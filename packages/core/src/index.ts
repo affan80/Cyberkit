@@ -30,3 +30,5 @@ export { FAIL_ON } from "./cli/config.js";
 export type { FailOn } from "./cli/config.js";
 export { dedupeFindings, planScan, scan } from "./sdk/scan.js";
 export type { PluginSpec, ScanOptions, ScanPlan, ScanResult } from "./sdk/scan.js";
+export { scanStream } from "./sdk/scan-stream.js";
+export type { PluginSummary, ScanEvent } from "./sdk/scan-stream.js";
