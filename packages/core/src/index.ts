@@ -15,3 +15,5 @@ export { createTyposquatCheck, isWithinOneEdit, skeleton, snapshot as typosquatS
 export type { TyposquatSnapshot } from "./engines/typosquat.js";
 export { PluginError, definePlugin, runPlugin, runPluginModule } from "./plugins/base.js";
 export type { ModuleRunOptions, Plugin, PluginContext, PluginFindingInput, PluginRunResult, PluginStatus, RunOptions } from "./plugins/base.js";
+export { createSemgrepPlugin, mapSemgrepOutput, semgrepArgs } from "./plugins/semgrep.js";
+export type { SemgrepOptions } from "./plugins/semgrep.js";
