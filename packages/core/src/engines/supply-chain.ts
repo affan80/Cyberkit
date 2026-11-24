@@ -7,6 +7,7 @@
 import { access, readFile, stat } from "node:fs/promises";
 import { type Finding, type FindingInput, createFinding } from "../finding.js";
 import type { Scope } from "../scope.js";
+import { createTyposquatCheck } from "./typosquat.js";
 
 export const ENGINE = "supply-chain";
 const MANIFEST = "package.json";
@@ -74,6 +75,7 @@ export const defaultChecks: readonly Check[] = [
     m.deps.length > 0 && !m.hasLockfile
       ? [{ ruleId: "missing-lockfile", severity: "low", message: "dependencies are declared but no lockfile was found" }]
       : [],
+  createTyposquatCheck(),
 ];
 
 function parseDeps(json: unknown): Dep[] | undefined {
