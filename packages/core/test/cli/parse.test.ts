@@ -93,3 +93,23 @@ describe("parseCliArgs: errors", () => {
     expect(() => parseCliArgs(argv)).not.toThrow();
   });
 });
+
+describe("parseCliArgs: --fail-on", () => {
+  it("parses --fail-on", () => {
+    expect(config(["scan", "--fail-on", "high"]).failOn).toBe("high");
+    expect(config(["scan", "--fail-on=none"]).failOn).toBe("none");
+  });
+
+  it("defaults to low", () => {
+    expect(config(["scan"]).failOn).toBe("low");
+  });
+
+  it("rejects an invalid value with ConfigError", () => {
+    expect(() => parseCliArgs(["scan", "--fail-on", "nope"])).toThrow(ConfigError);
+  });
+
+  it("documents --fail-on and every exit code in the help", () => {
+    expect(HELP_TEXT).toContain("--fail-on");
+    for (const code of ["0", "1", "2", "3", "4"]) expect(HELP_TEXT).toMatch(new RegExp(`^\\s+${code}\\s+\\S`, "m"));
+  });
+});
