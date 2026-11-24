@@ -28,3 +28,5 @@ export { EXIT, exitCodeFor, exitCodeForError, meetsThreshold } from "./cli/exit.
 export type { ExitCode, ScanOutcome } from "./cli/exit.js";
 export { FAIL_ON } from "./cli/config.js";
 export type { FailOn } from "./cli/config.js";
+export { dedupeFindings, planScan, scan } from "./sdk/scan.js";
+export type { PluginSpec, ScanOptions, ScanPlan, ScanResult } from "./sdk/scan.js";
