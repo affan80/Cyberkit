@@ -34,3 +34,6 @@ export { scanStream } from "./sdk/scan-stream.js";
 export type { PluginSummary, ScanEvent } from "./sdk/scan-stream.js";
 export { main, run } from "./cli/main.js";
 export type { CliIO } from "./cli/main.js";
+export { SCOPE_FILE, ScopeFileError, compileGlob, loadScopeFile, parseScopeConfig } from "./scope-file.js";
+export type { GlobMatcher, ScopeConfig } from "./scope-file.js";
+export type { ScopeOptions } from "./scope.js";

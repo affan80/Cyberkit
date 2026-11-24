@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/affan80/Cyberkit/blob/dev/docs/scope.schema.json",
+  "title": "CyberKit scope file",
+  "description": "Optional .cyberkit/scope.json in the scan root. Narrows what a scan may touch with root-relative include/exclude globs. See docs/SCOPE.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version"],
+  "properties": {
+    "$schema": {
+      "description": "Optional reference to this schema, for editor support.",
+      "type": "string"
+    },
+    "version": {
+      "description": "Format version. Must be 1.",
+      "const": 1
+    },
+    "include": {
+      "description": "If non-empty, only paths matching one of these globs (or beneath a matching directory) are in scope.",
+      "$ref": "#/$defs/patterns"
+    },
+    "exclude": {
+      "description": "Paths matching one of these globs, and everything beneath a matching directory, are out of scope.",
+      "$ref": "#/$defs/patterns"
+    }
+  },
+  "$defs": {
+    "patterns": {
+      "type": "array",
+      "maxItems": 1000,
+      "items": { "$ref": "#/$defs/pattern" }
+    },
+    "pattern": {
+      "description": "Root-relative glob with '/' separators. '*' and '?' match within one path segment; '**' matches any number of segments. No leading '/', no '..' segments, no backslashes.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024,
+      "pattern": "^(?!/)(?!(?:.*/)?\\.\\.(?:/|$))[^\\\\\\u0000]+$"
+    }
+  }
+}
