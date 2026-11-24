@@ -1,0 +1,105 @@
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { createFinding } from "../src/finding.js";
+import { StoreError, createStore } from "../src/store.js";
+
+let dir: string;
+let file: string;
+beforeEach(async () => {
+  dir = await mkdtemp(path.join(tmpdir(), "cyberkit-store-"));
+  file = path.join(dir, "findings.jsonl");
+});
+afterEach(async () => {
+  await rm(dir, { recursive: true, force: true });
+});
+
+const mk = (n: number) => createFinding({ engine: "e", ruleId: `r${n}`, severity: "low", message: `m${n}`, file: "a.ts", line: n + 1 });
+
+describe("createStore", () => {
+  it("reads an empty list when the file does not exist yet", async () => {
+    expect(await createStore(file).readAll()).toEqual([]);
+  });
+
+  it("appends one JSON object per line", async () => {
+    const s = createStore(file);
+    await s.append(mk(1));
+    await s.append(mk(2));
+    const lines = (await readFile(file, "utf8")).split("\n");
+    expect(lines).toHaveLength(3);
+    expect(lines[2]).toBe("");
+    expect(JSON.parse(lines[0] as string)).toEqual(mk(1));
+  });
+
+  it("round-trips findings in insertion order", async () => {
+    const s = createStore(file);
+    await s.appendMany([mk(1), mk(2), mk(3)]);
+    expect(await s.readAll()).toEqual([mk(1), mk(2), mk(3)]);
+  });
+
+  it("is append-only: a second store instance keeps earlier data", async () => {
+    await createStore(file).append(mk(1));
+    await createStore(file).append(mk(2));
+    expect(await createStore(file).readAll()).toEqual([mk(1), mk(2)]);
+  });
+
+  it("streams findings lazily with iterate()", async () => {
+    const s = createStore(file);
+    await s.appendMany([mk(1), mk(2)]);
+    const seen: string[] = [];
+    for await (const f of s.iterate()) seen.push(f.ruleId);
+    expect(seen).toEqual(["r1", "r2"]);
+  });
+
+  it("counts findings", async () => {
+    const s = createStore(file);
+    expect(await s.count()).toBe(0);
+    await s.appendMany([mk(1), mk(2)]);
+    expect(await s.count()).toBe(2);
+  });
+
+  it("appendMany with an empty list writes nothing", async () => {
+    const s = createStore(file);
+    await s.appendMany([]);
+    await expect(stat(file)).rejects.toThrow();
+  });
+
+  it("creates the file owner-only (0600) on POSIX", async () => {
+    if (process.platform === "win32") return;
+    await createStore(file).append(mk(1));
+    expect((await stat(file)).mode & 0o777).toBe(0o600);
+  });
+
+  it("exposes no update or delete API", () => {
+    expect(Object.keys(createStore(file)).sort()).toEqual(["append", "appendMany", "count", "iterate", "readAll"]);
+  });
+
+  it("refuses to store a tampered finding and leaves the file untouched", async () => {
+    const s = createStore(file);
+    await s.append(mk(1));
+    const bad = { ...mk(2), message: "tampered" };
+    await expect(s.append(bad)).rejects.toThrow(StoreError);
+    expect(await s.count()).toBe(1);
+  });
+
+  it("appendMany is all-or-nothing when one finding is invalid", async () => {
+    const s = createStore(file);
+    await expect(s.appendMany([mk(1), { ...mk(2), message: "tampered" }])).rejects.toThrow(StoreError);
+    expect(await s.count()).toBe(0);
+  });
+
+  it("reports the line number of a corrupt record", async () => {
+    await writeFile(file, `${JSON.stringify(mk(1))}\n{not json}\n`);
+    await expect(createStore(file).readAll()).rejects.toThrow(/line 2/);
+  });
+
+  it("rejects a record that parses but is not a valid finding", async () => {
+    await writeFile(file, `${JSON.stringify({ ...mk(1), message: "edited on disk" })}\n`);
+    await expect(createStore(file).readAll()).rejects.toThrow(StoreError);
+  });
+
+  it("rejects an empty path", () => {
+    expect(() => createStore("")).toThrow(StoreError);
+  });
+});
