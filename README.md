@@ -2,7 +2,7 @@
 
 **An offline-first security assessment toolkit for developers and security teams.**
 
-> Status: early development (`@cyberkit/core` v0.1.0). APIs may change.
+> Status: early development (`@cyberkit/core` v0.1.0). The CLI and SDK work, but APIs may still change before the first release.
 
 ## What it is
 
@@ -45,22 +45,139 @@ Most security scanners send code or metadata to a cloud service, need accounts a
 
 - Node.js **>= 22.13.0**
 
-## Setup
+## Install
+
+`@cyberkit/core` isn't published to npm yet. Until it is, run it from source:
 
 ```bash
 git clone https://github.com/affan80/Cyberkit.git
 cd Cyberkit
 git checkout dev
-npm install
+npm install        # also links the `cyberkit` command into node_modules/.bin
 npm run build
 npm test
 ```
 
-Usage examples will be added as the CLI lands (roadmap tasks 17-19).
+Then run the CLI from the repo with `npx cyberkit ...`, or point at any project: `npx cyberkit scan /path/to/project`.
+
+## Usage
+
+### CLI
+
+```bash
+npx cyberkit scan [target] [options]
+```
+
+| Option | Description |
+|---|---|
+| `-f, --format <fmt>` | `text` (default), `json` or `sarif` |
+| `-o, --output <file>` | Write the report to a file instead of stdout (directories are created) |
+| `-p, --plugin <name>` | Enable a plugin, repeatable. Built in: `semgrep` |
+| `--fail-on <sev>` | Exit 1 on findings at or above `critical`, `high`, `medium`, `low` (default), `info` or `none` |
+| `-q, --quiet` | Hide plugin warnings on stderr |
+| `-h, --help` / `-v, --version` | Help and version |
+
+`target` defaults to the current directory. The report goes to stdout and diagnostics go to stderr, so piping (`cyberkit scan -f json | jq`) stays clean. Text output is coloured only in a terminal, and never when `NO_COLOR` is set.
+
+Example:
+
+```console
+$ npx cyberkit scan .
+CyberKit: 3 findings (1 high, 2 medium)
+
+HIGH      package.json:1  supply-chain/credentials-in-url
+          b@git+https://[REDACTED]@example.com/b.git#v1 (dependencies) embeds credentials in its URL
+
+MEDIUM    package.json:1  supply-chain/possible-typosquat
+          lodahs (dependencies) resembles the popular package "lodash"
+
+MEDIUM    package.json:1  supply-chain/wildcard-version
+          left-pad@* (dependencies) accepts any version
+```
+
+The credential in that URL never reaches the report. It's redacted when the finding is created.
+
+### Exit codes
+
+These are stable, so CI can rely on them.
+
+| Code | Meaning |
+|---|---|
+| `0` | No findings at or above `--fail-on` |
+| `1` | Findings at or above `--fail-on` |
+| `2` | Usage or configuration error |
+| `3` | Scan error (invalid target, I/O failure) |
+| `4` | Partial scan: a plugin failed, and no findings at or above `--fail-on` |
+
+### What gets checked
+
+The **supply-chain engine** reads `package.json` (through the scope, so it can't be pointed outside the target) and reports:
+
+| Rule | Severity |
+|---|---|
+| `credentials-in-url`: user:password or a token in a dependency URL | high |
+| `insecure-source`: `http://` or `git://` dependency sources | high |
+| `possible-typosquat`: same "skeleton" as a popular package (`l0dash`, `lo-dash`) | high |
+| `possible-typosquat`: one edit away from a popular package (`lodahs`, `reakt`) | medium |
+| `wildcard-version`: `*`, `latest`, `x` or an empty range | medium |
+| `unpinned-git-dependency`: git or GitHub dependency without a `#ref` | medium |
+| `missing-lockfile`: dependencies but no lockfile | low |
+
+Typosquats are matched against a snapshot of popular packages that ships with CyberKit, so nothing is fetched.
+
+### Semgrep plugin
+
+```bash
+npx cyberkit scan . -p semgrep
+```
+
+Needs `semgrep` on your `PATH` and a **local** rule config: `.semgrep.yml`, `.semgrep.yaml` or `.semgrep/` in the target. Registry configs (`auto`, `p/...`, URLs) are refused because they download rules, and Semgrep always runs with `--metrics=off --disable-version-check`. If Semgrep is missing or fails, the scan still finishes and exits `4` (or `1` if other findings cross the threshold). To write your own plugins, see the [plugin guide](docs/PLUGINS.md).
+
+### Limiting what a scan touches
+
+Add an optional `.cyberkit/scope.json` to the scanned project to exclude (or only include) paths:
+
+```json
+{ "version": 1, "exclude": ["vendor", "**/fixtures", "dist/**"] }
+```
+
+The CLI and SDK pick it up automatically. Findings in excluded paths are dropped, and an invalid file exits `2`. See [docs/SCOPE.md](docs/SCOPE.md) and the [JSON schema](docs/scope.schema.json).
+
+### GitHub code scanning
+
+```yaml
+# .github/workflows/cyberkit.yml (in the project you want to scan)
+- run: npx cyberkit scan . -f sarif -o cyberkit.sarif --fail-on high
+- uses: github/codeql-action/upload-sarif@v4
+  if: always()
+  with:
+    sarif_file: cyberkit.sarif
+```
+
+Each SARIF result carries the finding's content-addressed id as a fingerprint, so alerts stay the same across runs.
+
+### SDK
+
+```ts
+import { renderPlain, scan, scanStream } from "@cyberkit/core";
+
+// One call: engine and plugins run concurrently. Findings are deduplicated, sorted and frozen.
+const result = await scan({ target: ".", plugins: ["semgrep"], failOn: "high" });
+console.log(result.summary.total, "findings, exit code", result.exitCode);
+process.stdout.write(renderPlain(result.findings));
+
+// Streaming: findings arrive as each engine or plugin finishes.
+for await (const event of scanStream({ target: "." })) {
+  if (event.type === "finding") console.log(event.finding.severity, event.finding.ruleId);
+  if (event.type === "end") process.exitCode = event.exitCode;
+}
+```
+
+The SDK and CLI give identical results, and a parity test enforces it. Other exports include `renderJson`, `renderSarif`, `createStore` (append-only JSONL), `createScope`, `redact`, `definePlugin`, `runPlugin` and `runPluginModule`.
 
 ## Roadmap
 
-v0.1.0 follows a 22-task, test-driven plan. Done so far: monorepo init, error types and the finding model. Next up: redaction, then scope validation, config/CLI parsing, the findings store, engines, plugins and reporters.
+All 22 tasks of the v0.1.0 test-driven plan are done: redaction, scope validation and scope files, the static no-network guard, config and CLI parsing, the findings store, the supply-chain engine and typosquat snapshot, plugin isolation and the Semgrep plugin, plain, JSON and SARIF reporters, exit codes, `scan()`, `scanStream()`, the CLI, the end-to-end and SDK/CLI parity test suites, and the docs. Next: publishing `@cyberkit/core` to npm and the `@cyberkit/tui` terminal UI.
 
 ## Contributing
 

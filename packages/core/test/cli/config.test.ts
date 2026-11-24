@@ -9,6 +9,7 @@ describe("createConfig", () => {
       output: undefined,
       plugins: [],
       quiet: false,
+      failOn: "low",
     });
     expect(DEFAULT_CONFIG.format).toBe("text");
   });
@@ -59,5 +60,19 @@ describe("createConfig", () => {
     expect(c.plugins).toEqual(["semgrep"]);
     expect(Object.isFrozen(c)).toBe(true);
     expect(Object.isFrozen(c.plugins)).toBe(true);
+  });
+});
+
+describe("createConfig: failOn", () => {
+  it("defaults to low", () => {
+    expect(createConfig({}).failOn).toBe("low");
+  });
+
+  it.each(["critical", "high", "medium", "low", "info", "none"])("accepts %s", (failOn) => {
+    expect(createConfig({ failOn }).failOn).toBe(failOn);
+  });
+
+  it("rejects an unknown threshold and lists the valid ones", () => {
+    expect(() => createConfig({ failOn: "severe" })).toThrow(/critical, high, medium, low, info, none/);
   });
 });

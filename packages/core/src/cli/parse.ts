@@ -9,8 +9,17 @@ Options:
   -o, --output <file>   Write the report to a file instead of stdout
   -p, --plugin <name>   Enable a plugin (repeatable)
   -q, --quiet           Suppress progress output
+      --fail-on <sev>   Exit 1 on findings at or above: critical, high, medium,
+                        low, info, none (default: low)
   -h, --help            Show this help
   -v, --version         Show the version
+
+Exit codes:
+  0  No findings at or above --fail-on
+  1  Findings at or above --fail-on
+  2  Usage or configuration error
+  3  Scan error (invalid target, I/O failure)
+  4  Partial scan: a plugin failed, no findings at or above --fail-on
 `;
 
 export type ParseResult =
@@ -25,6 +34,7 @@ const OPTIONS = {
   output: { type: "string", short: "o" },
   plugin: { type: "string", short: "p", multiple: true },
   quiet: { type: "boolean", short: "q" },
+  "fail-on": { type: "string" },
 } as const;
 
 export function parseCliArgs(argv: readonly string[]): ParseResult {
@@ -52,6 +62,7 @@ export function parseCliArgs(argv: readonly string[]): ParseResult {
       output: values.output,
       plugins: values.plugin,
       quiet: values.quiet,
+      failOn: values["fail-on"],
     }),
   };
 }

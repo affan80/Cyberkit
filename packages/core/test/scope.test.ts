@@ -135,3 +135,48 @@ describe("scope.contains", () => {
     expect(await scope.contains("a\0b")).toBe(false);
   });
 });
+
+describe("scope include/exclude", () => {
+  it("excludes files matched by a pattern, and everything under a matched directory", async () => {
+    const scope = await createScope(root, { exclude: ["src/deep", "*.log"], scopeFile: false });
+    await expect(scope.resolve("src/deep/x.ts")).rejects.toThrow(/excluded/);
+    await expect(scope.resolve("debug.log")).rejects.toThrow(ScopeError);
+    expect(await scope.resolve("src/a.ts")).toBe(path.join(root, "src", "a.ts"));
+    expect(scope.isExcluded("src/deep")).toBe(true);
+    expect(scope.isExcluded("src/a.ts")).toBe(false);
+  });
+
+  it("restricts to include patterns when given", async () => {
+    const scope = await createScope(root, { include: ["src"], scopeFile: false });
+    expect(await scope.contains("src/a.ts")).toBe(true);
+    expect(await scope.contains("package.json")).toBe(false);
+  });
+
+  it("never excludes the root itself", async () => {
+    const scope = await createScope(root, { exclude: ["**"], scopeFile: false });
+    expect(await scope.resolve(".")).toBe(root);
+  });
+
+  it("applies exclusion after following symlinks", async () => {
+    const scope = await createScope(root, { exclude: ["src"], scopeFile: false });
+    await expect(scope.resolve("link-inside/a.ts")).rejects.toThrow(ScopeError);
+  });
+
+  it("loads .cyberkit/scope.json automatically and merges explicit excludes", async () => {
+    await mkdir(path.join(root, ".cyberkit"), { recursive: true });
+    await writeFile(path.join(root, ".cyberkit", "scope.json"), JSON.stringify({ version: 1, exclude: ["src/deep"] }));
+    try {
+      const scope = await createScope(root, { exclude: ["*.md"] });
+      expect(scope.exclude).toEqual(["src/deep", "*.md"]);
+      expect(await scope.contains("src/deep/x")).toBe(false);
+      const ignoring = await createScope(root, { scopeFile: false });
+      expect(await ignoring.contains("src/deep/x")).toBe(true);
+    } finally {
+      await rm(path.join(root, ".cyberkit"), { recursive: true, force: true });
+    }
+  });
+
+  it("rejects invalid explicit patterns", async () => {
+    await expect(createScope(root, { exclude: ["../x"], scopeFile: false })).rejects.toThrow(/pattern/);
+  });
+});

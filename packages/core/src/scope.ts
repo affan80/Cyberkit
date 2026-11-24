@@ -7,6 +7,7 @@
  */
 import { lstat, realpath, stat } from "node:fs/promises";
 import path from "node:path";
+import { compileGlob, loadScopeFile, parseScopeConfig } from "./scope-file.js";
 
 export class ScopeError extends Error {
   override readonly name = "ScopeError";
@@ -19,6 +20,21 @@ export interface Scope {
   resolve(input: string): Promise<string>;
   /** Like resolve(), but returns a boolean and never throws. */
   contains(input: string): Promise<boolean>;
+  /** Effective include patterns (empty means everything). */
+  readonly include: readonly string[];
+  /** Effective exclude patterns. */
+  readonly exclude: readonly string[];
+  /** Whether a root-relative POSIX path is excluded by include/exclude (no filesystem access). */
+  isExcluded(relPath: string): boolean;
+}
+
+export interface ScopeOptions {
+  /** Only these root-relative globs (and everything beneath a match) are in scope. Overrides the scope file's include. */
+  readonly include?: readonly string[];
+  /** Root-relative globs to exclude, added to the scope file's excludes. */
+  readonly exclude?: readonly string[];
+  /** Read `.cyberkit/scope.json` from the root (default: true). */
+  readonly scopeFile?: boolean;
 }
 
 const isMissing = (e: unknown): boolean =>
@@ -57,7 +73,7 @@ async function realpathLoose(abs: string): Promise<string> {
   }
 }
 
-export async function createScope(rootInput: string): Promise<Scope> {
+export async function createScope(rootInput: string, options: ScopeOptions = {}): Promise<Scope> {
   assertPathString(rootInput, "scope root");
   let root: string;
   try {
@@ -68,6 +84,27 @@ export async function createScope(rootInput: string): Promise<Scope> {
     throw new ScopeError("scope root does not exist or is not accessible");
   }
 
+  const fromFile = options.scopeFile === false ? { include: [], exclude: [] } : await loadScopeFile(root);
+  const explicit = parseScopeConfig({ version: 1, include: options.include ?? [], exclude: options.exclude ?? [] });
+  const include = Object.freeze([...(options.include === undefined ? fromFile.include : explicit.include)]);
+  const exclude = Object.freeze([...fromFile.exclude, ...explicit.exclude]);
+  const includeMatchers = include.map(compileGlob);
+  const excludeMatchers = exclude.map(compileGlob);
+
+  // A path is excluded if it, or any directory above it, matches an exclude;
+  // with includes, it (or a directory above it) must match an include.
+  const isExcluded = (relPath: string): boolean => {
+    const parts = relPath.split("/").filter((p) => p !== "" && p !== ".");
+    if (parts.length === 0) return false; // the root itself is always in scope
+    let included = includeMatchers.length === 0;
+    for (let i = 1; i <= parts.length; i++) {
+      const prefix = parts.slice(0, i).join("/");
+      if (excludeMatchers.some((m) => m.test(prefix))) return true;
+      if (!included && includeMatchers.some((m) => m.test(prefix))) included = true;
+    }
+    return !included;
+  };
+
   const inside = (real: string): boolean => {
     const rel = path.relative(root, real);
     return rel === "" || (rel !== ".." && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel));
@@ -77,6 +114,7 @@ export async function createScope(rootInput: string): Promise<Scope> {
     assertPathString(input, "path");
     const real = await realpathLoose(path.resolve(root, input));
     if (!inside(real)) throw new ScopeError("path is outside the scan scope");
+    if (isExcluded(path.relative(root, real).split(path.sep).join("/"))) throw new ScopeError("path is excluded by the scope configuration");
     return real;
   };
 
@@ -86,5 +124,5 @@ export async function createScope(rootInput: string): Promise<Scope> {
       () => false,
     );
 
-  return Object.freeze({ root, resolve, contains });
+  return Object.freeze({ root, resolve, contains, include, exclude, isExcluded });
 }

@@ -127,6 +127,7 @@ const invalid = (message: string): Finding =>
   createFinding({ engine: ENGINE, ruleId: "invalid-manifest", severity: "low", message, file: MANIFEST });
 
 export async function scanSupplyChain(scope: Scope, options: SupplyChainOptions = {}): Promise<readonly Finding[]> {
+  if (scope.isExcluded(MANIFEST)) return []; // excluded by the scope configuration
   const manifestPath = await scope.resolve(MANIFEST);
   let size: number;
   try {
@@ -145,7 +146,8 @@ export async function scanSupplyChain(scope: Scope, options: SupplyChainOptions 
   }
   if (deps === undefined) return [invalid(`${MANIFEST} must contain a JSON object`)];
 
-  const lockChecks = await Promise.all(LOCKFILES.map(async (name) => exists(await scope.resolve(name))));
+  // An excluded lockfile counts as absent.
+  const lockChecks = await Promise.all(LOCKFILES.map((name) => scope.resolve(name).then(exists, () => false)));
   const manifest: Manifest = { raw, deps, hasLockfile: lockChecks.some(Boolean) };
 
   const locate = makeDepLocator(raw);
