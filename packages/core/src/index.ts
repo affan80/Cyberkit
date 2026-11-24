@@ -32,3 +32,5 @@ export { dedupeFindings, planScan, scan } from "./sdk/scan.js";
 export type { PluginSpec, ScanOptions, ScanPlan, ScanResult } from "./sdk/scan.js";
 export { scanStream } from "./sdk/scan-stream.js";
 export type { PluginSummary, ScanEvent } from "./sdk/scan-stream.js";
+export { main, run } from "./cli/main.js";
+export type { CliIO } from "./cli/main.js";
