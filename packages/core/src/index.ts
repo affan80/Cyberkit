@@ -17,3 +17,10 @@ export { PluginError, definePlugin, runPlugin, runPluginModule } from "./plugins
 export type { ModuleRunOptions, Plugin, PluginContext, PluginFindingInput, PluginRunResult, PluginStatus, RunOptions } from "./plugins/base.js";
 export { createSemgrepPlugin, mapSemgrepOutput, semgrepArgs } from "./plugins/semgrep.js";
 export type { SemgrepOptions } from "./plugins/semgrep.js";
+export { escapeForTerminal, renderPlain } from "./reporters/plain.js";
+export type { PlainOptions } from "./reporters/plain.js";
+export { JSON_SCHEMA_VERSION, renderJson } from "./reporters/json.js";
+export type { JsonOptions } from "./reporters/json.js";
+export { renderSarif } from "./reporters/sarif.js";
+export { compareFindings, countBySeverity, sortFindings } from "./reporters/order.js";
+export { VERSION } from "./version.js";
