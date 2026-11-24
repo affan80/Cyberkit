@@ -22,3 +22,7 @@ export type { JsonOptions } from "./reporters/json.js";
 export { renderSarif } from "./reporters/sarif.js";
 export { compareFindings, countBySeverity, sortFindings } from "./reporters/order.js";
 export { VERSION } from "./version.js";
+export { EXIT, exitCodeFor, exitCodeForError, meetsThreshold } from "./cli/exit.js";
+export type { ExitCode, ScanOutcome } from "./cli/exit.js";
+export { FAIL_ON } from "./cli/config.js";
+export type { FailOn } from "./cli/config.js";

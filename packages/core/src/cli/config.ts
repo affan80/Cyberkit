@@ -3,12 +3,17 @@
 export const FORMATS = ["text", "json", "sarif"] as const;
 export type Format = (typeof FORMATS)[number];
 
+/** Lowest severity that makes the scan exit with FINDINGS; "none" never fails on findings. */
+export const FAIL_ON = ["critical", "high", "medium", "low", "info", "none"] as const;
+export type FailOn = (typeof FAIL_ON)[number];
+
 export interface Config {
   readonly target: string;
   readonly format: Format;
   readonly output: string | undefined;
   readonly plugins: readonly string[];
   readonly quiet: boolean;
+  readonly failOn: FailOn;
 }
 
 export interface ConfigInput {
@@ -17,6 +22,7 @@ export interface ConfigInput {
   output?: string;
   plugins?: readonly string[];
   quiet?: boolean;
+  failOn?: string;
 }
 
 export class ConfigError extends Error {
@@ -29,10 +35,12 @@ export const DEFAULT_CONFIG: Config = Object.freeze({
   output: undefined,
   plugins: Object.freeze([]),
   quiet: false,
+  failOn: "low",
 });
 
 const PLUGIN_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const isFormat = (v: string): v is Format => (FORMATS as readonly string[]).includes(v);
+const isFailOn = (v: unknown): v is FailOn => (FAIL_ON as readonly unknown[]).includes(v);
 
 function pathValue(value: unknown, what: string): string {
   if (typeof value !== "string" || value.length === 0) {
@@ -66,11 +74,15 @@ export function createConfig(input: ConfigInput): Config {
     throw new ConfigError("quiet must be a boolean");
   }
 
+  const failOn = input.failOn ?? DEFAULT_CONFIG.failOn;
+  if (!isFailOn(failOn)) throw new ConfigError(`fail-on must be one of: ${FAIL_ON.join(", ")}`);
+
   return Object.freeze({
     target,
     format,
     output,
     plugins: Object.freeze([...plugins]),
     quiet: input.quiet ?? false,
+    failOn,
   });
 }
