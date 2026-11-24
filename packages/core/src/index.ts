@@ -9,3 +9,5 @@ export { FindingError, SEVERITIES, createFinding, verifyFinding } from "./findin
 export type { Finding, FindingInput, Severity } from "./finding.js";
 export { StoreError, createStore } from "./store.js";
 export type { Store } from "./store.js";
+export { ENGINE as SUPPLY_CHAIN_ENGINE, defaultChecks, scanSupplyChain } from "./engines/supply-chain.js";
+export type { Check, CheckResult, Dep, Manifest, SupplyChainOptions } from "./engines/supply-chain.js";
