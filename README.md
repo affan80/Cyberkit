@@ -131,7 +131,17 @@ Typosquats are matched against a snapshot of popular packages that ships with Cy
 npx cyberkit scan . -p semgrep
 ```
 
-Needs `semgrep` on your `PATH` and a **local** rule config: `.semgrep.yml`, `.semgrep.yaml` or `.semgrep/` in the target. Registry configs (`auto`, `p/...`, URLs) are refused because they download rules, and Semgrep always runs with `--metrics=off --disable-version-check`. If Semgrep is missing or fails, the scan still finishes and exits `4` (or `1` if other findings cross the threshold). To write your own plugins, see the plugin guide (coming in roadmap task 22).
+Needs `semgrep` on your `PATH` and a **local** rule config: `.semgrep.yml`, `.semgrep.yaml` or `.semgrep/` in the target. Registry configs (`auto`, `p/...`, URLs) are refused because they download rules, and Semgrep always runs with `--metrics=off --disable-version-check`. If Semgrep is missing or fails, the scan still finishes and exits `4` (or `1` if other findings cross the threshold). To write your own plugins, see the [plugin guide](docs/PLUGINS.md).
+
+### Limiting what a scan touches
+
+Add an optional `.cyberkit/scope.json` to the scanned project to exclude (or only include) paths:
+
+```json
+{ "version": 1, "exclude": ["vendor", "**/fixtures", "dist/**"] }
+```
+
+The CLI and SDK pick it up automatically. Findings in excluded paths are dropped, and an invalid file exits `2`. See [docs/SCOPE.md](docs/SCOPE.md) and the [JSON schema](docs/scope.schema.json).
 
 ### GitHub code scanning
 
@@ -167,7 +177,7 @@ The SDK and CLI give identical results, and a parity test enforces it. Other exp
 
 ## Roadmap
 
-v0.1.0 follows a 22-task, test-driven plan. Done: redaction, scope validation, the static no-network guard, config and CLI parsing, the findings store, the supply-chain engine and typosquat snapshot, plugin isolation and the Semgrep plugin, plain, JSON and SARIF reporters, exit codes, `scan()`, `scanStream()` and the CLI. Remaining: the end-to-end CLI and parity test suites, the scope schema docs and the plugin guide.
+All 22 tasks of the v0.1.0 test-driven plan are done: redaction, scope validation and scope files, the static no-network guard, config and CLI parsing, the findings store, the supply-chain engine and typosquat snapshot, plugin isolation and the Semgrep plugin, plain, JSON and SARIF reporters, exit codes, `scan()`, `scanStream()`, the CLI, the end-to-end and SDK/CLI parity test suites, and the docs. Next: publishing `@cyberkit/core` to npm and the `@cyberkit/tui` terminal UI.
 
 ## Contributing
 

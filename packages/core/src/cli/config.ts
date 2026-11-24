@@ -26,7 +26,7 @@ export interface ConfigInput {
 }
 
 export class ConfigError extends Error {
-  override readonly name = "ConfigError";
+  override readonly name: string = "ConfigError";
 }
 
 export const DEFAULT_CONFIG: Config = Object.freeze({
