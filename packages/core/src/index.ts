@@ -11,3 +11,5 @@ export { StoreError, createStore } from "./store.js";
 export type { Store } from "./store.js";
 export { ENGINE as SUPPLY_CHAIN_ENGINE, defaultChecks, scanSupplyChain } from "./engines/supply-chain.js";
 export type { Check, CheckResult, Dep, Manifest, SupplyChainOptions } from "./engines/supply-chain.js";
+export { createTyposquatCheck, isWithinOneEdit, skeleton, snapshot as typosquatSnapshot } from "./engines/typosquat.js";
+export type { TyposquatSnapshot } from "./engines/typosquat.js";
