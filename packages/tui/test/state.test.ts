@@ -151,3 +151,21 @@ describe("batched scan events", () => {
     expect(performance.now() - t).toBeLessThan(200);
   });
 });
+
+describe("visibleFindings memoisation", () => {
+  it("returns the same list (no re-sort) when only the selection, focus or mode changes", () => {
+    const s = withFindings(base());
+    const first = visibleFindings(s);
+    expect(visibleFindings(key(s, "j"))).toBe(first);
+    expect(visibleFindings(key(s, "tab", "?"))).toBe(first);
+  });
+
+  it("recomputes when findings, the severity filter or the query change", () => {
+    const s = withFindings(base());
+    const first = visibleFindings(s);
+    expect(visibleFindings(key(s, "s"))).not.toBe(first);
+    expect(visibleFindings({ ...s, query: "x" })).not.toBe(first);
+    expect(visibleFindings(withFindings(s, [finding()]))).not.toBe(first);
+    expect(visibleFindings({ ...key(s, "s", "escape") })).toEqual(first);
+  });
+});

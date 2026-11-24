@@ -49,7 +49,19 @@ export function initialState(target: string, pluginNames: readonly string[]): Tu
   return { target, pluginNames, phase: "scanning", findings: [], plugins: [], focus: "findings", selected: 0, severity: "all", query: "", mode: "normal", spinner: 0 };
 }
 
+// Sorting is the dominant cost of a frame, so the filtered, sorted list is cached per findings
+// array and only recomputed when the findings, the severity filter or the query change.
+const visibleCache = new WeakMap<readonly Finding[], { severity: SeverityFilter; query: string; list: Finding[] }>();
+
 export function visibleFindings(state: TuiState): Finding[] {
+  const cached = visibleCache.get(state.findings);
+  if (cached && cached.severity === state.severity && cached.query === state.query) return cached.list;
+  const list = computeVisible(state);
+  visibleCache.set(state.findings, { severity: state.severity, query: state.query, list });
+  return list;
+}
+
+function computeVisible(state: TuiState): Finding[] {
   const q = state.query.toLowerCase();
   return sortFindings(
     state.findings.filter(
