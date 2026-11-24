@@ -5,3 +5,7 @@ export { ConfigError, DEFAULT_CONFIG, FORMATS, createConfig } from "./cli/config
 export type { Config, ConfigInput, Format } from "./cli/config.js";
 export { HELP_TEXT, parseCliArgs } from "./cli/parse.js";
 export type { ParseResult } from "./cli/parse.js";
+export { FindingError, SEVERITIES, createFinding, verifyFinding } from "./finding.js";
+export type { Finding, FindingInput, Severity } from "./finding.js";
+export { StoreError, createStore } from "./store.js";
+export type { Store } from "./store.js";
