@@ -109,16 +109,66 @@ function makeLineLocator(raw: string): (offset: number) => number {
   };
 }
 
+/**
+ * Offsets of every key in each top-level dependency section, from ONE linear
+ * pass over the manifest (#53). The old locator re-searched from the start of
+ * the section for every flagged dependency: O(k x section size).
+ *
+ * The input is valid JSON (JSON.parse already accepted it), so a small
+ * scanner is enough. It decodes keys (so escaped names match), ignores
+ * "dependencies" appearing anywhere but as a top-level key, and keeps the
+ * last duplicate key, like JSON.parse does.
+ */
+function indexDependencyKeys(raw: string): Map<string, Map<string, number>> {
+  const sections = new Set<string>(SECTIONS);
+  const index = new Map<string, Map<string, number>>();
+  const stack: number[] = []; // open brackets: 0x7b "{" or 0x5b "["
+  let expectKey = false;
+  let topKey: string | undefined; // last key read in the root object
+  let section: Map<string, number> | undefined; // the dependency section being indexed
+
+  for (let i = 0; i < raw.length; i++) {
+    const c = raw.charCodeAt(i);
+    if (c === 0x22) {
+      const start = i;
+      for (i++; i < raw.length; i++) {
+        const d = raw.charCodeAt(i);
+        if (d === 0x5c) i++;
+        else if (d === 0x22) break;
+      }
+      if (expectKey && (stack.length === 1 || (stack.length === 2 && section))) {
+        const name = JSON.parse(raw.slice(start, i + 1)) as string;
+        if (stack.length === 1) topKey = name;
+        else section?.set(name, start);
+      }
+      expectKey = false;
+    } else if (c === 0x7b) {
+      stack.push(c);
+      expectKey = true;
+      if (stack.length === 2 && stack[0] === 0x7b && topKey !== undefined && sections.has(topKey)) {
+        section = new Map();
+        index.set(topKey, section); // a later duplicate section replaces it, like JSON.parse
+      }
+    } else if (c === 0x5b) {
+      stack.push(c);
+      expectKey = false;
+    } else if (c === 0x7d || c === 0x5d) {
+      stack.pop();
+      if (stack.length < 2) section = undefined;
+      expectKey = false;
+    } else if (c === 0x2c) {
+      expectKey = stack[stack.length - 1] === 0x7b;
+    }
+  }
+  return index;
+}
+
 function makeDepLocator(raw: string): (dep: Dep) => number | undefined {
   const lineAt = makeLineLocator(raw);
+  const index = indexDependencyKeys(raw);
   return (dep) => {
-    const sectionAt = raw.indexOf(JSON.stringify(dep.section));
-    if (sectionAt === -1) return undefined;
-    const key = JSON.stringify(dep.name);
-    for (let i = raw.indexOf(key, sectionAt); i !== -1; i = raw.indexOf(key, i + 1)) {
-      if (/^\s*:/.test(raw.slice(i + key.length, i + key.length + 8))) return lineAt(i);
-    }
-    return undefined;
+    const offset = index.get(dep.section)?.get(dep.name);
+    return offset === undefined ? undefined : lineAt(offset);
   };
 }
 
