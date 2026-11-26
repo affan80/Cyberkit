@@ -1,6 +1,7 @@
 /**
  * Findings: immutable records with deterministic, content-addressed ids.
- * Secrets are redacted at creation, and the id is derived from the redacted
+ * Secrets are redacted at creation in every free-text field (engine, ruleId,
+ * message, file, evidence; #55), and the id is derived from the redacted
  * content, so a secret can never influence (or be recovered from) an id.
  */
 import { createHash } from "node:crypto";
@@ -68,13 +69,16 @@ function computeId(f: Omit<Finding, "id">): string {
   return createHash("sha256").update(canonical).digest("hex");
 }
 
+/** Every free-text field. Rule ids come from rule files and paths from the scanned tree, so both can carry secrets. */
+const TEXT_FIELDS = ["engine", "ruleId", "message", "file", "evidence"] as const;
+
 export function createFinding(input: FindingInput): Finding {
   const raw = input as unknown as Record<string, unknown>;
-  const redacted = {
-    ...raw,
-    message: typeof raw.message === "string" ? redact(raw.message) : raw.message,
-    evidence: typeof raw.evidence === "string" ? redact(raw.evidence) : raw.evidence,
-  };
+  const redacted: Record<string, unknown> = { ...raw };
+  for (const field of TEXT_FIELDS) {
+    const value = raw[field];
+    if (typeof value === "string") redacted[field] = redact(value);
+  }
   return build(redacted, computeId);
 }
 
@@ -89,8 +93,9 @@ export function verifyFinding(value: unknown): Finding {
     if (raw.id !== id) throw new FindingError("finding id does not match its content");
     return id;
   });
-  if (redact(finding.message) !== finding.message || (finding.evidence !== undefined && redact(finding.evidence) !== finding.evidence)) {
-    throw new FindingError("finding contains unredacted secrets");
+  for (const field of TEXT_FIELDS) {
+    const value = finding[field];
+    if (value !== undefined && redact(value) !== value) throw new FindingError("finding contains unredacted secrets");
   }
   return finding;
 }
