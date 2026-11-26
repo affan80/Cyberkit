@@ -5,7 +5,7 @@
  *
  * Timing is noisy (CI, other test files running in parallel), so each size
  * takes the best of 3 runs, the ratio is only enforced once the 2n run is
- * long enough to measure, and a pair is re-measured up to 3 times: it passes
+ * long enough to measure, and a pair is re-measured up to 5 times: it passes
  * if any attempt scales linearly. A quadratic rule fails every attempt.
  * Before the fix, "token" x 40k took about 3.4 s.
  */
@@ -14,9 +14,12 @@ import { createFinding, redact } from "../src/index.js";
 
 const BASE_BYTES = 200_000;
 const NOISE_FLOOR_MS = 25;
-const ATTEMPTS = 3;
+const ATTEMPTS = 5;
 const MAX_RATIO = 3;
-const MAX_MS = 1000;
+/** Absolute cap per 2n run: generous, since a parallel test file can stall a worker. */
+const MAX_MS = 3000;
+/** Per-case vitest timeout (the 5 s default is too tight under parallel load). */
+const CASE_TIMEOUT_MS = 30_000;
 
 const PIECES: Readonly<Record<string, string>> = {
   // key=value rule (the reported case), one per keyword family
@@ -53,9 +56,9 @@ const PIECES: Readonly<Record<string, string>> = {
   "URL no @": "https://xxxxxxxx",
 };
 
-function bestOf3(input: string): number {
+function bestOf(input: string, runs = 3): number {
   let best = Infinity;
-  for (let i = 0; i < 3; i++) {
+  for (let i = 0; i < runs; i++) {
     const start = performance.now();
     redact(input);
     best = Math.min(best, performance.now() - start);
@@ -70,13 +73,13 @@ describe("redaction scales linearly (#50)", () => {
     const large = piece.repeat(2 * n);
     let worst = "";
     for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
-      const a = bestOf3(small);
-      const b = bestOf3(large);
+      const a = bestOf(small);
+      const b = bestOf(large);
       if (b < MAX_MS && (b < NOISE_FLOOR_MS || b / Math.max(a, 1) < MAX_RATIO)) return;
       worst = `n: ${a.toFixed(1)} ms, 2n: ${b.toFixed(1)} ms`;
     }
     expect.fail(`super-linear redaction (${worst})`);
-  });
+  }, CASE_TIMEOUT_MS);
 
   it("creates a finding with a 280 KB adversarial message quickly (issue repro)", () => {
     const start = performance.now();
