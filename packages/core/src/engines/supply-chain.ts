@@ -4,8 +4,9 @@
  * the scan target. Checks are plain functions, so new ones (e.g. typosquat
  * detection) plug in without touching the engine.
  */
-import { access, readFile, stat } from "node:fs/promises";
+import { access } from "node:fs/promises";
 import { type Finding, type FindingInput, createFinding } from "../finding.js";
+import { FileTooLargeError } from "../safe-read.js";
 import type { Scope } from "../scope.js";
 import { createTyposquatCheck } from "./typosquat.js";
 
@@ -128,16 +129,16 @@ const invalid = (message: string): Finding =>
 
 export async function scanSupplyChain(scope: Scope, options: SupplyChainOptions = {}): Promise<readonly Finding[]> {
   if (scope.isExcluded(MANIFEST)) return []; // excluded by the scope configuration
-  const manifestPath = await scope.resolve(MANIFEST);
-  let size: number;
+  // One descriptor for the scope check, size cap and read (no TOCTOU, #51).
+  let raw: string;
   try {
-    size = (await stat(manifestPath)).size;
-  } catch {
-    return []; // no manifest: nothing to check
+    raw = await scope.readFile(MANIFEST, { maxBytes: MAX_MANIFEST_BYTES });
+  } catch (e) {
+    if (e instanceof FileTooLargeError) return [invalid(`${MANIFEST} is larger than ${MAX_MANIFEST_BYTES} bytes and was not parsed`)];
+    const code = (e as NodeJS.ErrnoException).code;
+    if (code === "ENOENT" || code === "ENOTDIR") return []; // no manifest: nothing to check
+    throw e;
   }
-  if (size > MAX_MANIFEST_BYTES) return [invalid(`${MANIFEST} is larger than ${MAX_MANIFEST_BYTES} bytes and was not parsed`)];
-
-  const raw = await readFile(manifestPath, "utf8");
   let deps: Dep[] | undefined;
   try {
     deps = parseDeps(JSON.parse(raw));
