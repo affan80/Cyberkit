@@ -136,6 +136,20 @@ describe("redact: safety properties", () => {
     expect(performance.now() - start).toBeLessThan(1000);
   });
 
+  it("stays linear on adversarial input for the structural rules (#49)", () => {
+    const evil = [
+      '"cookie": "'.repeat(20_000),
+      '"set-cookie": ['.repeat(20_000),
+      '{"authorization": "' + "a".repeat(200_000),
+      "https://".repeat(30_000),
+      "x".repeat(200_000) + "@",
+      "auth=".repeat(40_000),
+    ].join("\n");
+    const start = performance.now();
+    redact(evil);
+    expect(performance.now() - start).toBeLessThan(1000);
+  });
+
   it("throws a TypeError for non-string input", () => {
     expect(() => redact(undefined as unknown as string)).toThrow(TypeError);
   });

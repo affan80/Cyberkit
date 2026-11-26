@@ -64,6 +64,22 @@ export const SECRET_CORPUS: readonly SecretCase[] = [
     issue: 48,
     toEnd: true,
   },
+
+  // Issue #49: structural forms of secrets.
+  { name: "JSON Authorization header", text: j('{"Authorization": "Bearer ', 'jsonBearerValue456"}'), secret: "jsonBearerValue456", issue: 49 },
+  { name: "JSON lower-case Basic auth", text: j('{"authorization":"Basic ', 'dXNlcjpwYXNzd29yZA=="}'), secret: "dXNlcjpwYXNzd29yZA", issue: 49 },
+  { name: "JSON set-cookie array", text: j('{"set-cookie": ["sid=', 'jsonCookieSecret", "theme=dark"]}'), secret: "jsonCookieSecret", issue: 49 },
+  { name: "pretty-printed JSON cookie array", text: j('"cookie": [\n  "a=1",\n  "sid=', 'prettyCookieSecret"\n]'), secret: "prettyCookieSecret", issue: 49 },
+  { name: "JSON header with escaped quotes", text: j('{"Cookie": "a=\\"q\\"; sid=', 'escapedCookieSecret", "Host": "x"}'), secret: "escapedCookieSecret", issue: 49 },
+  { name: "Python dict X-Api-Key", text: j("{'x-api-key': '", "pyHeaderSecret9'}"), secret: "pyHeaderSecret9", issue: 49 },
+  { name: "URL token without password", text: j("https://", "ghTokenOnlyInUrl123", "@github.com/o/r.git"), secret: "ghTokenOnlyInUrl123", issue: 49 },
+  { name: "git+https URL token", text: j("git+https://", "npmDepToken456", "@example.com/o/r.git"), secret: "npmDepToken456", issue: 49 },
+  { name: "single-quoted key (Python/JS)", text: j("{'password': '", "pyDictSecret1'}"), secret: "pyDictSecret1", issue: 49 },
+  { name: "passphrase=", text: j("passphrase=", "MyPassPhrase77"), secret: "MyPassPhrase77", issue: 49 },
+  { name: "Azure AccountKey=", text: j("AccountName=a;AccountKey=", "AzureKeyBase64Value==;"), secret: "AzureKeyBase64Value", issue: 49 },
+  { name: 'Docker "auth"', text: j('{"auths":{"r":{"auth":"', 'ZG9ja2VyOnNlY3JldA=="}}}'), secret: "ZG9ja2VyOnNlY3JldA", issue: 49 },
+  { name: ".npmrc _auth", text: j("_auth=", "bnBtOnNlY3JldA=="), secret: "bnBtOnNlY3JldA", issue: 49 },
+  { name: "authorization= with a Bearer scheme", text: j("authorization=Bearer ", "queryBearerTok"), secret: "queryBearerTok", issue: 49 },
 ];
 
 /** Text that looks a bit like a secret but isn't one, and must survive untouched. */
@@ -76,4 +92,10 @@ export const NON_SECRETS: readonly string[] = [
   "AIza is the prefix of Google API keys",
   "-----BEGIN PGP PUBLIC KEY BLOCK-----",
   "PuTTY is an SSH client",
+  "author: Jane Doe",
+  '"authors": 3',
+  "git clone ssh://git@github.com/o/r.git",
+  "git@github.com:o/r.git",
+  "https://example.com/users/a@b.example",
+  '{"Host": "api.example.com", "Accept": "application/json"}',
 ];

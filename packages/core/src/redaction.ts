@@ -18,6 +18,18 @@ const RULES: readonly Rule[] = [
   // PuTTY .ppk private keys: header through the Private-MAC line (or the end).
   [/PuTTY-User-Key-File-\d+:[\s\S]*?(?:Private-MAC:[^\r\n]*|$)/g, REDACTED],
 
+  // JSON / dict form of auth and cookie headers (HAR files, request logs):
+  // {"Authorization": "Bearer ..."}, {'cookie': '...'}, {"set-cookie": ["a=b", ...]}.
+  // Strings stop at an unescaped quote or the end of the line, so this stays linear.
+  [
+    /(["'])((?:proxy-)?authorization|x-api-key|set-cookie|cookie)\1([ \t]*:[ \t]*)(?:"(?:[^"\\\r\n]|\\.)*"|'(?:[^'\\\r\n]|\\.)*')/gi,
+    `$1$2$1$3"${REDACTED}"`,
+  ],
+  [
+    /(["'])((?:proxy-)?authorization|x-api-key|set-cookie|cookie)\1([ \t]*:[ \t]*)\[(?:\s*(?:"(?:[^"\\\r\n]|\\.)*"|'(?:[^'\\\r\n]|\\.)*')\s*,?)*/gi,
+    `$1$2$1$3["${REDACTED}"`,
+  ],
+
   // Auth and cookie headers: keep the header name, drop the rest of the line.
   [
     /(?<![\w-])((?:proxy-)?authorization|x-api-key|set-cookie|cookie)([ \t]*:[ \t]*)[^\r\n]+/gi,
@@ -43,12 +55,20 @@ const RULES: readonly Rule[] = [
 
   // Credentials embedded in URLs: scheme://user:SECRET@host
   [/(\b[a-z][a-z0-9+.-]*:\/\/[^\s/:@]+:)[^\s/@]+(@)/gi, `$1${REDACTED}$2`],
+  // Token-only userinfo: scheme://TOKEN@host (git remotes with a PAT). Like the
+  // supply-chain engine's maskCredentials(), the conventional ssh user "git@"
+  // is left alone.
+  [/(\b[a-z][a-z0-9+.-]{0,31}:\/\/)(?!git@)[^\s/:@[\]"'<>]+(@)/gi, `$1${REDACTED}$2`],
 
-  // key=value / "key": "value" for secret-looking keys.
+  // key=value / "key": "value" / 'key': 'value' for secret-looking keys. An
+  // auth scheme (Bearer/Basic/Token) before the value is kept with the key; a
+  // JSON array value was already handled by the header rule above.
   [
-    /(?<!\w)(\w*?(?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|private[_-]?key)\w*"?[ \t]*[:=][ \t]*"?)[^\s"',;&]+/gi,
+    /(?<!\w)(\w*?(?:password|passwd|passphrase|pwd|secret|token|api[_-]?key|access[_-]?key|private[_-]?key|account[_-]?key|authorization|cookie)\w*["']?[ \t]*[:=][ \t]*["']?(?:(?:bearer|basic|token)[ \t]+)?)(?!\[["'])[^\s"',;&]+/gi,
     `$1${REDACTED}`,
   ],
+  // "auth" only as a whole key (Docker config.json, .npmrc _auth), never as part of "author".
+  [/(?<![\w-])(_?auth(["']?)[ \t]*[:=][ \t]*["']?)[^\s"',;&]+/gi, `$1${REDACTED}`],
 ];
 
 export function redact(text: string): string {
