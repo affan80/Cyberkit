@@ -132,9 +132,7 @@ describe("createStore: bounded reads (#57)", () => {
 
   it("does not echo record content in JSON errors", async () => {
     await writeFile(file, '{"note": xxxxxxxx-secret-ish}\n');
-    const err = await createStore(file).readAll().catch((e: unknown) => e as Error);
-    expect(err).toBeInstanceOf(StoreError);
-    expect(err.message).toBe("corrupt record at line 1: invalid JSON");
+    await expect(createStore(file).readAll()).rejects.toThrow(new StoreError("corrupt record at line 1: invalid JSON"));
   });
 
   it("refuses to write a record it could not read back", async () => {
