@@ -9,9 +9,9 @@
  * (issue #47).
  */
 import { spawn } from "node:child_process";
-import { access } from "node:fs/promises";
+import { lstat } from "node:fs/promises";
 import path from "node:path";
-import { type Plugin, type PluginFindingInput, PluginError, definePlugin } from "./base.js";
+import { type Plugin, type PluginContext, type PluginFindingInput, PluginError, definePlugin } from "./base.js";
 import { neutralCwd, resolveExecutable } from "./exec.js";
 
 export interface SemgrepOptions {
@@ -74,18 +74,27 @@ export function semgrepArgs(configs: readonly string[], root: string): string[] 
   return ["scan", "--json", "--quiet", "--metrics=off", "--disable-version-check", ...configs.flatMap((c) => ["--config", c]), root];
 }
 
-const exists = (p: string): Promise<boolean> => access(p).then(() => true, () => false);
+const present = (p: string): Promise<boolean> => lstat(p).then(() => true, () => false);
 
-async function resolveConfigs(root: string, configs: readonly string[] | undefined): Promise<string[]> {
+/**
+ * Resolves rule configs through the scan scope (#56): a default config (or a
+ * relative explicit one) that is a symlink to somewhere outside the root is
+ * refused, never handed to semgrep. An absolute explicit config is the
+ * caller's own choice and is used as given.
+ */
+async function resolveConfigs(ctx: PluginContext, configs: readonly string[] | undefined): Promise<string[]> {
+  const inScope = (c: string): Promise<string> =>
+    ctx.resolve(c).catch(() => {
+      throw new PluginError(`semgrep config "${c}" is outside the scan root or excluded by the scope`);
+    });
   if (configs !== undefined) {
     for (const c of configs) {
       if (NETWORK_CONFIG.test(c)) throw new PluginError(`semgrep config "${c}" needs the network; only local configs are allowed`);
     }
-    return configs.map((c) => path.resolve(root, c));
+    return Promise.all(configs.map((c) => (path.isAbsolute(c) ? c : inScope(c))));
   }
   for (const candidate of DEFAULT_CONFIGS) {
-    const p = path.join(root, candidate);
-    if (await exists(p)) return [p];
+    if (await present(path.join(ctx.root, candidate))) return [await inScope(candidate)];
   }
   throw new PluginError(`no local semgrep config found (expected one of ${DEFAULT_CONFIGS.join(", ")})`);
 }
@@ -129,7 +138,7 @@ export function createSemgrepPlugin(options: SemgrepOptions = {}): Plugin {
   return definePlugin({
     name: "semgrep",
     async run(ctx) {
-      const configs = await resolveConfigs(ctx.root, options.configs);
+      const configs = await resolveConfigs(ctx, options.configs);
       const env = options.env ?? { PATH: process.env.PATH ?? "" };
       const name = options.binary ?? "semgrep";
       const binary = await resolveExecutable(name, { pathEnv: env.PATH, root: ctx.root });

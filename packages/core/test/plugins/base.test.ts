@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -192,5 +192,32 @@ describe("runPlugin: output processing is bounded (#52)", () => {
     expect(res.findings[0]?.message).toHaveLength(MAX_TEXT_CHARS + 1);
     expect(res.skipped).toBe(19_999);
     expect(performance.now() - start).toBeLessThan(5000);
+  });
+});
+
+describe("ctx.resolve (#56)", () => {
+  const FIXTURES = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../fixtures/plugins");
+
+  it("resolves through the scope in-process and refuses escapes", async () => {
+    const seen: Record<string, boolean> = {};
+    await runPlugin(
+      definePlugin({
+        name: "resolver",
+        async run(ctx) {
+          for (const p of ["src/a.ts", "../outside.txt", "/etc/hosts"]) seen[p] = await ctx.resolve(p).then(() => true, () => false);
+          return [];
+        },
+      }),
+      scope,
+    );
+    expect(seen).toEqual({ "src/a.ts": true, "../outside.txt": false, "/etc/hosts": false });
+  });
+
+  it("applies the same containment rule inside a worker, including symlinks", async () => {
+    await symlink(tmpdir(), path.join(dir, "link-out")).catch(() => undefined);
+    const res = await runPluginModule(path.join(FIXTURES, "resolver.mjs"), scope);
+    expect(res.status).toBe("ok");
+    const byPath = Object.fromEntries(res.findings.map((f) => [f.message, f.ruleId]));
+    expect(byPath).toEqual({ "src/a.ts": "accepted", "../outside.txt": "refused", "/etc/hosts": "refused", "link-out": "refused" });
   });
 });

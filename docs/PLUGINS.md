@@ -120,6 +120,7 @@ To wrap a scanner the way the Semgrep plugin does (`packages/core/src/plugins/se
 
 - Spawn with `shell: false` and an argument array. Never build a command string.
 - **Resolve the binary yourself** with `resolveExecutable()` from `packages/core/src/plugins/exec.ts`, then spawn the absolute path it returns. A bare `spawn("tool")` searches `PATH` relative to the child's cwd, so a `PATH` containing `.` or an empty entry (a leading, trailing or doubled `:`) would run the scanned repo's own `./tool`. `resolveExecutable()` skips empty and relative entries and anything inside the scan root.
+- **Resolve every path you read or hand to the tool with `ctx.resolve()`**: config files, rule directories, inputs. It applies the scope (realpath plus containment, and the scope's excludes for in-process plugins), so a repo can't symlink `.semgrep.yml` to a file outside the root.
 - **Never use the scan root as the child's cwd.** Pass the target as an argument and use `neutralCwd()` (the OS temp dir), so nothing the tool loads relative to its cwd comes from the repo.
 - Pass `signal: ctx.signal` (and `killSignal: "SIGKILL"`) so a timeout really kills the child.
 - **Cap stdout**, so a runaway tool can't exhaust memory.
