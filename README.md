@@ -71,13 +71,15 @@ npx cyberkit scan [target] [options]
 | Option | Description |
 |---|---|
 | `-f, --format <fmt>` | `text` (default), `json` or `sarif` |
-| `-o, --output <file>` | Write the report to a file instead of stdout (directories are created) |
+| `-o, --output <file>` | Write the report to a file instead of stdout (directories are created, symlinks are refused; see below) |
 | `-p, --plugin <name>` | Enable a plugin, repeatable. Built in: `semgrep` |
 | `--fail-on <sev>` | Exit 1 on findings at or above `critical`, `high`, `medium`, `low` (default), `info` or `none` |
 | `-q, --quiet` | Hide plugin warnings on stderr |
 | `-h, --help` / `-v, --version` | Help and version |
 
 `target` defaults to the current directory. The report goes to stdout and diagnostics go to stderr, so piping (`cyberkit scan -f json | jq`) stays clean. Text output is coloured only in a terminal, and never when `NO_COLOR` is set.
+
+`--output` treats the scanned tree and the working directory as untrusted. CyberKit refuses (exit `3`) to write the report if the output file, or any directory leading to it inside those trees, is a symbolic link. A pull request that plants `cyberkit.sarif -> ~/.ssh/authorized_keys` can't make a CI scan overwrite files outside the checkout. The report is written to a temp file and renamed into place, so it is never half-written either.
 
 Example:
 
