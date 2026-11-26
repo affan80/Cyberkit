@@ -122,6 +122,20 @@ describe("redact: safety properties", () => {
     expect(performance.now() - start).toBeLessThan(1000);
   });
 
+  it("stays linear on adversarial input for the vendor-token and key-block rules (#48)", () => {
+    const evil = [
+      "sk-".repeat(50_000),
+      "glpat-".repeat(30_000),
+      "AIza".repeat(50_000),
+      "https://hooks.slack.com/services/".repeat(5000),
+      "PuTTY-User-Key-File-1:".repeat(5000),
+      "-----BEGIN PGP PRIVATE KEY BLOCK-----".repeat(5000),
+    ].join("\n");
+    const start = performance.now();
+    redact(evil);
+    expect(performance.now() - start).toBeLessThan(1000);
+  });
+
   it("throws a TypeError for non-string input", () => {
     expect(() => redact(undefined as unknown as string)).toThrow(TypeError);
   });

@@ -11,8 +11,12 @@ type Rule = readonly [pattern: RegExp, replacement: string];
 
 // Order matters: whole-block and header rules run before generic key=value.
 const RULES: readonly Rule[] = [
-  // PEM private keys, including truncated blocks with no END marker.
-  [/-----BEGIN ([A-Z ]*PRIVATE KEY)-----[\s\S]*?(?:-----END \1-----|$)/g, REDACTED],
+  // PEM / PGP private keys ("... PRIVATE KEY BLOCK"), including truncated
+  // blocks with no END marker.
+  [/-----BEGIN ([A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?)-----[\s\S]*?(?:-----END \1-----|$)/g, REDACTED],
+
+  // PuTTY .ppk private keys: header through the Private-MAC line (or the end).
+  [/PuTTY-User-Key-File-\d+:[\s\S]*?(?:Private-MAC:[^\r\n]*|$)/g, REDACTED],
 
   // Auth and cookie headers: keep the header name, drop the rest of the line.
   [
@@ -26,6 +30,16 @@ const RULES: readonly Rule[] = [
   [/\bxox[abprs]-[A-Za-z0-9-]{10,}/g, REDACTED],
   [/\bnpm_[A-Za-z0-9]{36}\b/g, REDACTED],
   [/\beyJ[\w-]{5,}\.eyJ[\w-]{5,}\.[\w-]{5,}/g, REDACTED],
+  // GitLab personal/deploy/runner/trigger/service-account tokens.
+  [/\bgl(?:pat|dt|rt|ptt|soat)-[A-Za-z0-9_-]{20,}/g, REDACTED],
+  // Slack incoming webhooks and workflow triggers: the whole URL is the secret.
+  [/\bhttps:\/\/hooks\.slack\.com\/(?:services|workflows|triggers)\/[^\s"'<>`]+/gi, REDACTED],
+  // Stripe secret / restricted keys and webhook signing secrets.
+  [/\b(?:[sr]k_(?:live|test)_[A-Za-z0-9]{10,}|whsec_[A-Za-z0-9]{20,})/g, REDACTED],
+  // OpenAI (sk-, sk-proj-, sk-svcacct-, sk-admin-) and Anthropic (sk-ant-) keys.
+  [/\bsk-(?:proj-|ant-|svcacct-|admin-)?[A-Za-z0-9_-]{20,}/g, REDACTED],
+  // Google API keys.
+  [/\bAIza[0-9A-Za-z_-]{35}/g, REDACTED],
 
   // Credentials embedded in URLs: scheme://user:SECRET@host
   [/(\b[a-z][a-z0-9+.-]*:\/\/[^\s/:@]+:)[^\s/@]+(@)/gi, `$1${REDACTED}$2`],
