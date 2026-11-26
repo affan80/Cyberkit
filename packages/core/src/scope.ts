@@ -7,6 +7,7 @@
  */
 import { lstat, realpath, stat } from "node:fs/promises";
 import path from "node:path";
+import { readFileAtomic } from "./safe-read.js";
 import { compileGlob, loadScopeFile, parseScopeConfig } from "./scope-file.js";
 
 export class ScopeError extends Error {
@@ -18,6 +19,14 @@ export interface Scope {
   readonly root: string;
   /** Canonical absolute path for `input`, or throws ScopeError if it is outside the scope. */
   resolve(input: string): Promise<string>;
+  /**
+   * Reads an in-scope file as UTF-8 through a single descriptor, so the file
+   * that was checked is the file that is read (no symlink swap in between) and
+   * at most `maxBytes` are ever read. Throws ScopeError when the path is out of
+   * scope, FileTooLargeError over the cap, UnsafeReadError if the file changed
+   * while being opened, and the usual ENOENT error when it doesn't exist.
+   */
+  readFile(input: string, options: { readonly maxBytes: number }): Promise<string>;
   /** Like resolve(), but returns a boolean and never throws. */
   contains(input: string): Promise<boolean>;
   /** Effective include patterns (empty means everything). */
@@ -124,5 +133,8 @@ export async function createScope(rootInput: string, options: ScopeOptions = {})
       () => false,
     );
 
-  return Object.freeze({ root, resolve, contains, include, exclude, isExcluded });
+  const readFile = async (input: string, options: { readonly maxBytes: number }): Promise<string> =>
+    readFileAtomic(await resolve(input), options.maxBytes);
+
+  return Object.freeze({ root, resolve, contains, readFile, include, exclude, isExcluded });
 }

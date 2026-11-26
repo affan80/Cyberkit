@@ -4,7 +4,8 @@
  * The format is documented in docs/SCOPE.md and docs/scope.schema.json; a
  * test keeps that schema and this validator in agreement.
  */
-import { readFile, realpath, stat } from "node:fs/promises";
+import { realpath } from "node:fs/promises";
+import { FileTooLargeError, readFileAtomic } from "./safe-read.js";
 import path from "node:path";
 import { ConfigError } from "./cli/config.js";
 
@@ -68,11 +69,17 @@ export async function loadScopeFile(root: string): Promise<ScopeConfig> {
   if (rel === ".." || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)) {
     throw new ScopeFileError(`${SCOPE_FILE} must not point outside the scan root`);
   }
-  if ((await stat(real)).size > MAX_FILE_BYTES) throw new ScopeFileError(`${SCOPE_FILE} is larger than ${MAX_FILE_BYTES} bytes`);
+  let text: string;
+  try {
+    text = await readFileAtomic(real, MAX_FILE_BYTES); // no TOCTOU between the check above and the read (#51)
+  } catch (e) {
+    if (e instanceof FileTooLargeError) throw new ScopeFileError(`${SCOPE_FILE} is larger than ${MAX_FILE_BYTES} bytes`);
+    throw new ScopeFileError(`${SCOPE_FILE}: cannot be read`);
+  }
 
   let json: unknown;
   try {
-    json = JSON.parse(await readFile(real, "utf8"));
+    json = JSON.parse(text);
   } catch {
     throw new ScopeFileError(`${SCOPE_FILE}: invalid JSON`);
   }
