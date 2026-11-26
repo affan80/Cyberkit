@@ -1,0 +1,27 @@
+{
+  "name": "@cyberkit/tui",
+  "version": "0.1.0",
+  "description": "Interactive, lazygit-style terminal UI for CyberKit scans",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "bin"
+  ],
+  "bin": {
+    "cyberkit-tui": "bin/cyberkit-tui"
+  },
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "build": "tsc -p ../core/tsconfig.build.json && tsc -p tsconfig.build.json",
+    "pretest": "npm run build",
+    "test": "vitest run",
+    "typecheck": "tsc -p ../core/tsconfig.build.json && tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@cyberkit/core": "0.1.0"
+  }
+}
