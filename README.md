@@ -177,6 +177,73 @@ for await (const event of scanStream({ target: "." })) {
 
 The SDK and CLI give identical results, and a parity test enforces it. Report order is locale-independent, so the same findings produce byte-identical text, JSON and SARIF on every machine. Other exports include `renderJson`, `renderSarif`, `createStore` (append-only JSONL), `createScope`, `redact`, `definePlugin`, `runPlugin` and `runPluginModule`.
 
+## Developer console
+
+For working on CyberKit itself there is a lazygit-style console that runs every project command from one screen, keeps a history of every run and pulls out the errors of each one.
+
+```bash
+npm run build   # once
+npm run ui      # or: npx cyberkit-dev
+```
+
+```text
+ CyberKit dev console · cyberkit                                                      idle · 2 runs
+┌─ 1 Commands ─────────────────────┐┌─ 3 Output · core › typecheck · ✗ exit 2 · 12 lines · follow ─┐
+│ checks                           ││                                                              │
+│ ▶ verify                         ││ > @cyberkit/core@0.1.0 typecheck                             │
+│ root                             ││ > tsc -p tsconfig.json                                       │
+│   lint                     ✓ 5.2s││                                                              │
+│   build                          ││ src/version.ts(3,14): error TS2322: Type 'string' is not assi│
+│   test                           ││ npm error Lifecycle script `typecheck` failed with error:    │
+│   typecheck                      ││ npm error code 2                                             │
+│ core                             ││ npm error path /home/dev/projects/security/cyberkit-repo/pack│
+│   build                          ││ npm error workspace @cyberkit/core@0.1.0                     │
+│   test                           ││ npm error location /home/dev/projects/security/cyberkit-repo/│
+│   typecheck                ✗ 5.2s││ npm error command failed                                     │
+│ dev                              ││ npm error command sh -c tsc -p tsconfig.json                 │
+└──────────────────────────────────┘│                                                              │
+┌─ 2 Runs ─────────────────────────┐└──────────────────────────────────────────────────────────────┘
+│›✗ 04:37:23 core › typecheck  5.2s│┌─ 4 Errors (2) · core › typecheck ────────────────────────────┐
+│ ✓ 04:37:17 lint  5.2s            ││ typescript  src/version.ts:3:14  TS2322  Type 'string' is not│
+│                                  ││ npm  Lifecycle script `typecheck` failed with error:         │
+│                                  ││                                                              │
+│                                  ││                                                              │
+│                                  ││                                                              │
+└──────────────────────────────────┘└──────────────────────────────────────────────────────────────┘
+ enter show run · r rerun · x cancel · tab panes · ? help · q quit
+```
+
+- **Commands** lists every npm script of the repo and of each package (found automatically from the `package.json` files), the `verify` chain (`lint → typecheck → build → test`, the same order as CI) and *scan this repo*. Each command shows the result of its last run.
+- **Runs** is the history: every run is cached under `node_modules/.cache/cyberkit-dev` (a redacted log per run plus `history.json`, the last 100 runs), so it survives restarts.
+- **Output** streams the selected run live and follows the tail.
+- **Errors** is the error log of the selected run. It recognises TypeScript (`tsc`), ESLint, failing vitest tests (with the `file:line` of the assertion), uncaught exceptions with their first stack frame, and npm lifecycle failures; anything else that fails shows its last stderr line. Press `enter` on an error to jump to it in the output.
+
+| Key | Action |
+|---|---|
+| `enter` / `space` | Run the selected command · show the selected run · jump to the selected error |
+| `a` | Run all checks (`verify`) |
+| `r` | Re-run the run shown in Output |
+| `x` | Cancel the running command (kills its whole process tree) |
+| `e` | Show only the error lines (plus 3 lines of context) in Output |
+| `/` | Filter the output (`esc` clears) |
+| `f`, `G` | Toggle follow · jump to the end and follow |
+| `tab`, `1`–`4`, `h`/`l` | Switch panes |
+| `j`/`k`, `g`/`G`, `ctrl-d`/`ctrl-u` | Move or scroll |
+| `?` | Help |
+| `q` | Quit (asks first if a command is still running) |
+
+It also works without the UI, for scripts and quick checks:
+
+```bash
+npx cyberkit-dev --list               # what it can run
+npx cyberkit-dev --run chain:verify   # run without the UI, print the error log, exit with the command's code
+npx cyberkit-dev --errors             # the error log of the latest run (or: --errors <run id>)
+npx cyberkit-dev --history            # recent runs
+npx cyberkit-dev --clear-history      # delete the cache
+```
+
+Commands are spawned without a shell. Their output is stripped of terminal escape sequences and redacted before it is shown or written to the cache, so a test that prints a token doesn't leave it in a log. The console is a private workspace package (`packages/dev`) and is not published.
+
 ## Roadmap
 
 All 22 tasks of the v0.1.0 test-driven plan are done: redaction, scope validation and scope files, the static no-network guard, config and CLI parsing, the findings store, the supply-chain engine and typosquat snapshot, plugin isolation and the Semgrep plugin, plain, JSON and SARIF reporters, exit codes, `scan()`, `scanStream()`, the CLI, the end-to-end and SDK/CLI parity test suites, and the docs. The `@cyberkit/tui` terminal UI has shipped too. All findings from a red-team assessment have since been fixed: output and config symlinks, PATH hijacking, redaction gaps and ReDoS, TOCTOU reads, and unbounded plugin, store and scope-matching work. See [CHANGELOG.md](CHANGELOG.md).

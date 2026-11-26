@@ -6,6 +6,10 @@ All notable changes to CyberKit are documented here. The format follows [Keep a 
 
 Fixes from the red-team assessment of `dev` (issues #46–#57 and #60).
 
+### Added
+
+- **Developer console** (`npm run ui` / `npx cyberkit-dev`, private package `packages/dev`): a lazygit-style terminal UI that runs every npm script in the repo and its packages, the `verify` chain (lint → typecheck → build → test, as in CI) and a repo scan. It caches every run (log + error log) under `node_modules/.cache/cyberkit-dev`, and extracts an error log per run (TypeScript, ESLint, vitest failures, uncaught exceptions, npm failures) with jump-to-error. Non-interactive modes: `--list`, `--run <id>`, `--errors`, `--history`, `--clear-history`, `--frame`. Output is escape-stripped and redacted before display and before it is cached; cancel kills the whole process tree.
+
 ### Security
 
 - **`--output` never writes through a symlink** (#46). A report path, or a directory leading to it inside the scanned tree or the working directory, that is a symbolic link is refused (exit `3`). Reports are written to a temp file and renamed into place.
