@@ -150,3 +150,58 @@ describe("pluggable checks", () => {
     expect(fs[0]).toMatchObject({ ruleId: "banned", severity: "critical", file: "package.json" });
   });
 });
+
+describe("scanSupplyChain: line numbers (#53)", () => {
+  const lineOf = async (raw: string, name: string) => {
+    const fs = await scan(undefined, { raw });
+    return fs.find((f) => f.ruleId === "wildcard-version" && f.message.startsWith(`${name}@`))?.line;
+  };
+
+  it("ignores a \"dependencies\" key nested before the real section", async () => {
+    const raw = ['{', '  "scripts": { "dependencies": "echo", "a": "x" },', '  "dependencies": {', '    "a": "*"', '  }', '}'].join("\n");
+    expect(await lineOf(raw, "a")).toBe(4);
+  });
+
+  it("finds the right section when the same name is in several", async () => {
+    const raw = ['{', '  "devDependencies": { "a": "1.0.0" },', '  "dependencies": {', '    "a": "*"', '  }', '}'].join("\n");
+    expect(await lineOf(raw, "a")).toBe(4);
+  });
+
+  it("matches keys written with escapes", async () => {
+    const raw = ['{', '  "dependencies": {', '    "\\u0061bc": "*"', '  }', '}'].join("\n");
+    expect(await lineOf(raw, "abc")).toBe(3);
+  });
+
+  it("uses the last duplicate key, like JSON.parse", async () => {
+    const raw = ['{', '  "dependencies": {', '    "a": "1.0.0",', '    "a": "*"', '  }', '}'].join("\n");
+    expect(await lineOf(raw, "a")).toBe(4);
+  });
+
+  it("skips over nested values without losing its place", async () => {
+    const raw = ['{', '  "dependencies": {', '    "x": {"y": "*", "z": ["*"]},', '    "b": "*"', '  }', '}'].join("\n");
+    expect(await lineOf(raw, "b")).toBe(4);
+  });
+
+  it("stays linear in the number of flagged dependencies", async () => {
+    const time = async (n: number) => {
+      const raw = `{"dependencies":{${Array.from({ length: n }, (_, i) => `"p${i}":"*"`).join(",")}}}`;
+      let best = Infinity;
+      for (let k = 0; k < 2; k++) {
+        const start = performance.now();
+        const fs = await scan(undefined, { raw });
+        best = Math.min(best, performance.now() - start);
+        expect(fs.filter((f) => f.ruleId === "wildcard-version")).toHaveLength(n);
+      }
+      return best;
+    };
+    let ok = false;
+    let last = "";
+    for (let attempt = 0; attempt < 3 && !ok; attempt++) {
+      const a = await time(10_000);
+      const b = await time(20_000);
+      ok = b < 50 || b / a < 3;
+      last = `n: ${a.toFixed(0)} ms, 2n: ${b.toFixed(0)} ms`;
+    }
+    expect(ok, last).toBe(true);
+  }, 60_000);
+});
