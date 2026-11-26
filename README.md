@@ -4,12 +4,15 @@
 
 > Status: early development (`@cyberkit/core` v0.1.0). The CLI and SDK work, but APIs may still change before the first release.
 
+**Contents:** [What it is](#what-it-is) · [Install](#install) · [CLI](#cli) · [Terminal UI](#terminal-ui) · [Exit codes](#exit-codes) · [What gets checked](#what-gets-checked) · [GitHub code scanning](#github-code-scanning) · [SDK](#sdk) · [Developer console](#developer-console) · [Roadmap](#roadmap) · [Contributing](#contributing)
+
 ## What it is
 
 CyberKit is a Node.js/TypeScript toolkit that scans a project, runs security checks locally, and reports the results as structured findings. It ships as:
 
 - `@cyberkit/core`: a CLI and an SDK (`scan()` and a streaming iterator).
-- `@cyberkit/tui`: a terminal UI (planned, deferred past v0.1.0).
+- `@cyberkit/tui`: an interactive, lazygit-style terminal UI for scans (`cyberkit-tui`).
+- `@cyberkit/dev` (private, for contributors): a lazygit-style developer console that runs every project command and keeps an error log per run (`npm run ui`).
 
 Core features:
 
@@ -58,7 +61,9 @@ npm run build
 npm test
 ```
 
-Then run the CLI from the repo with `npx cyberkit ...`, or point at any project: `npx cyberkit scan /path/to/project`.
+Then run the CLI from the repo with `npx cyberkit ...`, or point at any project: `npx cyberkit scan /path/to/project`. For an interactive view of a scan, use `npx cyberkit-tui /path/to/project` (see [Terminal UI](#terminal-ui)).
+
+Working on CyberKit itself? `npm run ui` opens the [developer console](#developer-console): every build, lint, typecheck, test and scan command on one screen, with a history and an error log for each run.
 
 ## Usage
 
@@ -98,6 +103,52 @@ MEDIUM    package.json:1  supply-chain/wildcard-version
 ```
 
 The credential in that URL never reaches the report. It's redacted when the finding is created.
+
+### Terminal UI
+
+`cyberkit-tui` is an interactive, lazygit-style view of a scan. Findings stream in live; filter them by severity, search them, and read each one in full.
+
+```bash
+npx cyberkit-tui [target] [-p semgrep] [--fail-on <sev>]
+```
+
+```text
+╭─[1] Scan─────────────────────╮┏━[4] Findings 1/4━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+│ Target /home/dev/demo-project│┃ ▸ MEDIUM   package.json:1         supply-chain/possible-typosquat┃
+│ ✓ Done in 11 ms              │┃   MEDIUM   package.json:1         supply-chain/unpinned-git-depen┃
+│ 4 findings                   │┃   MEDIUM   package.json:1         supply-chain/wildcard-version  ┃
+│ exit 1 (findings)            │┃   LOW      package.json           supply-chain/missing-lockfile  ┃
+╰──────────────────────────────╯┃                                                                  ┃
+╭─[2] Severity─────────────────╮┃                                                                  ┃
+│ ▸ all          4             │┃                                                                  ┃
+│   critical     0             │┃                                                                  ┃
+│   high         0             │┃                                                                  ┃
+│   medium       3             │┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+│   low          1             │╭─Details──────────────────────────────────────────────────────────╮
+│   info         0             ││ MEDIUM  supply-chain/possible-typosquat                          │
+╰──────────────────────────────╯│ Location  package.json:1                                         │
+╭─[3] Plugins──────────────────╮│ ID        a6af5fac10186770                                       │
+│ ● supply-chain  engine       ││                                                                  │
+│                              ││ lodahs (dependencies) resembles the popular package "lodash"     │
+│                              ││                                                                  │
+│                              ││ Evidence                                                         │
+│                              ││ "lodahs": "^4.17.21"                                             │
+╰──────────────────────────────╯╰──────────────────────────────────────────────────────────────────╯
+j/k move  tab pane  / search  s severity  esc clear  r rescan  e export  ? help  q quit
+```
+
+| Key | Action |
+|---|---|
+| `j`/`k`, `↑`/`↓` | Move through the findings |
+| `tab`, `1`–`4` | Switch panes (scan, severity, plugins, findings) |
+| `/` | Search findings (`esc` clears) |
+| `s` | Cycle the severity filter |
+| `r` | Re-scan |
+| `e` | Export the shown findings as JSON (never overwrites a file) |
+| `?` | Help |
+| `q` | Quit; the exit code is the scan's exit code |
+
+`--frame` prints a single frame without going interactive (with `--cols`, `--rows` and `--keys` to replay keystrokes), which is handy in CI logs and for screenshots. Everything a finding contains is escaped before it is drawn, so a malicious file name or message can't inject terminal escape sequences.
 
 ### Exit codes
 
@@ -246,7 +297,7 @@ Commands are spawned without a shell. Their output is stripped of terminal escap
 
 ## Roadmap
 
-All 22 tasks of the v0.1.0 test-driven plan are done: redaction, scope validation and scope files, the static no-network guard, config and CLI parsing, the findings store, the supply-chain engine and typosquat snapshot, plugin isolation and the Semgrep plugin, plain, JSON and SARIF reporters, exit codes, `scan()`, `scanStream()`, the CLI, the end-to-end and SDK/CLI parity test suites, and the docs. The `@cyberkit/tui` terminal UI has shipped too. All findings from a red-team assessment have since been fixed: output and config symlinks, PATH hijacking, redaction gaps and ReDoS, TOCTOU reads, and unbounded plugin, store and scope-matching work. See [CHANGELOG.md](CHANGELOG.md).
+All 22 tasks of the v0.1.0 test-driven plan are done: redaction, scope validation and scope files, the static no-network guard, config and CLI parsing, the findings store, the supply-chain engine and typosquat snapshot, plugin isolation and the Semgrep plugin, plain, JSON and SARIF reporters, exit codes, `scan()`, `scanStream()`, the CLI, the end-to-end and SDK/CLI parity test suites, and the docs. The `@cyberkit/tui` terminal UI has shipped too, and contributors get the `npm run ui` developer console (runs every project command, caches runs, error log per run). All findings from a red-team assessment have since been fixed: output and config symlinks, PATH hijacking, redaction gaps and ReDoS, TOCTOU reads, and unbounded plugin, store and scope-matching work. See [CHANGELOG.md](CHANGELOG.md).
 
 Next: publishing `@cyberkit/core` to npm.
 
