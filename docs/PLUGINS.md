@@ -34,7 +34,9 @@ interface PluginFindingInput {
 | `file` | Resolved through the scope. Paths outside the scan root, including via `..` or symlinks, are **dropped** and counted in `skipped`. Inside paths become root-relative. |
 | any fields | The `id` is computed from the content (sha256), so a forged `id` is ignored. Identical findings dedupe across plugins. |
 | invalid items | Skipped and counted. The rest of your output is kept. |
-| too many items | Capped at `maxFindings` (10,000 by default). `truncated` is set. |
+| too many items | Capped at `maxFindings` valid findings (10,000 by default) and `maxItems` items examined, valid or not (2 × `maxFindings` by default). `truncated` is set. |
+| huge `message` / `evidence` | Cut to 8,192 characters plus `…`. Redaction runs a little past the cut, so a secret straddling it is removed whole. |
+| output that is slow to validate | Validation shares the plugin's deadline: `timeoutMs` from the start, plus 1 s of grace. Past that the run ends as `invalid-output`. |
 
 Running a plugin **never throws** into the scan. Every run ends as a `PluginRunResult` with `status` set to one of `ok`, `error`, `timeout`, `crashed` or `invalid-output`. Any non-`ok` status makes the scan exit `4` (partial), unless findings already cross `--fail-on`, in which case it exits `1`.
 
