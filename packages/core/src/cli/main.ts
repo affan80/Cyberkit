@@ -75,11 +75,16 @@ export async function main(argv: readonly string[], io: CliIO): Promise<ExitCode
   }
 }
 
+/** Write errors that only mean the reader of stdout went away. */
+const READER_GONE = new Set(["EPIPE", "ENOTCONN", "ECONNRESET"]);
+
 /** Binds main() to the real process. Uses process.exitCode so output always flushes. */
 export async function run(argv: readonly string[] = process.argv.slice(2)): Promise<void> {
-  // `cyberkit ... | head` closes the pipe early; that is not an error.
+  // `cyberkit ... | head` closes the pipe early; that is not an error. Pipes
+  // report EPIPE; socketpair stdio (child processes on macOS) can report
+  // ENOTCONN or ECONNRESET for the same thing.
   process.stdout.on("error", (e: NodeJS.ErrnoException) => {
-    if (e.code !== "EPIPE") throw e;
+    if (!READER_GONE.has(e.code ?? "")) throw e;
   });
   process.exitCode = await main(argv, { stdout: process.stdout, stderr: process.stderr, isTTY: process.stdout.isTTY === true, env: process.env });
 }
