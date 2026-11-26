@@ -41,7 +41,9 @@ const RULES: readonly Rule[] = [
   [/\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/g, REDACTED],
   [/\bxox[abprs]-[A-Za-z0-9-]{10,}/g, REDACTED],
   [/\bnpm_[A-Za-z0-9]{36}\b/g, REDACTED],
-  [/\beyJ[\w-]{5,}\.eyJ[\w-]{5,}\.[\w-]{5,}/g, REDACTED],
+  // JWTs. The lookbehind (not \b) keeps "eyJ-eyJ-eyJ-..." from retrying a scan
+  // at every "eyJ" in one run, which was quadratic (#50).
+  [/(?<![\w-])eyJ[\w-]{5,}\.eyJ[\w-]{5,}\.[\w-]{5,}/g, REDACTED],
   // GitLab personal/deploy/runner/trigger/service-account tokens.
   [/\bgl(?:pat|dt|rt|ptt|soat)-[A-Za-z0-9_-]{20,}/g, REDACTED],
   // Slack incoming webhooks and workflow triggers: the whole URL is the secret.
@@ -53,8 +55,9 @@ const RULES: readonly Rule[] = [
   // Google API keys.
   [/\bAIza[0-9A-Za-z_-]{35}/g, REDACTED],
 
-  // Credentials embedded in URLs: scheme://user:SECRET@host
-  [/(\b[a-z][a-z0-9+.-]*:\/\/[^\s/:@]+:)[^\s/@]+(@)/gi, `$1${REDACTED}$2`],
+  // Credentials embedded in URLs: scheme://user:SECRET@host. Scheme length is
+  // bounded so runs like "a.a.a.a..." don't make every \b a full rescan (#50).
+  [/(\b[a-z][a-z0-9+.-]{0,31}:\/\/[^\s/:@]+:)[^\s/@]+(@)/gi, `$1${REDACTED}$2`],
   // Token-only userinfo: scheme://TOKEN@host (git remotes with a PAT). Like the
   // supply-chain engine's maskCredentials(), the conventional ssh user "git@"
   // is left alone.
@@ -63,8 +66,13 @@ const RULES: readonly Rule[] = [
   // key=value / "key": "value" / 'key': 'value' for secret-looking keys. An
   // auth scheme (Bearer/Basic/Token) before the value is kept with the key; a
   // JSON array value was already handled by the header rule above.
+  //
+  // Linear time (#50): the key starts only at a word start, the keyword is
+  // found by a lookahead, and the key is then one greedy [\w-]+ run. The old
+  // \w*?KEYWORD\w* pair re-scanned the rest of the word for every split, so
+  // "tokentoken..." without a ":" or "=" took quadratic time.
   [
-    /(?<!\w)(\w*?(?:password|passwd|passphrase|pwd|secret|token|api[_-]?key|access[_-]?key|private[_-]?key|account[_-]?key|authorization|cookie)\w*["']?[ \t]*[:=][ \t]*["']?(?:(?:bearer|basic|token)[ \t]+)?)(?!\[["'])[^\s"',;&]+/gi,
+    /(?<![\w-])((?=[\w-]*?(?:password|passwd|passphrase|pwd|secret|token|api[_-]?key|access[_-]?key|private[_-]?key|account[_-]?key|authorization|cookie))[\w-]+["']?[ \t]*[:=][ \t]*["']?(?:(?:bearer|basic|token)[ \t]+)?)(?!\[["'])[^\s"',;&]+/gi,
     `$1${REDACTED}`,
   ],
   // "auth" only as a whole key (Docker config.json, .npmrc _auth), never as part of "author".
