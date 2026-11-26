@@ -5,6 +5,7 @@ import { appendFileSync, writeFileSync } from "node:fs";
 const mode = process.env.FAKE_SEMGREP_MODE ?? "results";
 if (process.env.FAKE_SEMGREP_ARGS_FILE) appendFileSync(process.env.FAKE_SEMGREP_ARGS_FILE, JSON.stringify(process.argv.slice(2)) + "\n");
 if (process.env.FAKE_SEMGREP_PID_FILE) writeFileSync(process.env.FAKE_SEMGREP_PID_FILE, String(process.pid));
+if (process.env.FAKE_SEMGREP_CWD_FILE) writeFileSync(process.env.FAKE_SEMGREP_CWD_FILE, process.cwd());
 const target = process.argv[process.argv.length - 1];
 
 const output = {
