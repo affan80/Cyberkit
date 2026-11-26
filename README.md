@@ -17,7 +17,7 @@ Core features:
 - **Plugin system** with isolated plugins (for example Semgrep).
 - **Scope model** that restricts what a scan may touch, using realpath-validated paths, so a scan can't wander outside the target.
 - **Immutable findings** with deterministic, content-addressed IDs, so the same issue always gets the same ID across runs.
-- **Redaction at creation time** for tokens, credentials, cookies, auth headers and private keys. Redaction is irreversible, so secrets never reach reports or logs. It recognises GitHub, GitLab, AWS, Slack (tokens and webhook URLs), npm, Stripe, OpenAI, Anthropic and Google API keys, JWTs, PEM/OpenSSH/PGP and PuTTY private keys, credentials in URLs (`user:pass@` and token-only `token@`), JSON/dict-form auth and cookie headers, and `key=value` secrets with plain, double- or single-quoted keys. A corpus test checks every format against the text, JSON and SARIF reports.
+- **Redaction at creation time** for tokens, credentials, cookies, auth headers and private keys. Redaction covers every free-text field of a finding (rule id, file path, message and evidence) and is irreversible, so secrets never reach reports or logs. It recognises GitHub, GitLab, AWS, Slack (tokens and webhook URLs), npm, Stripe, OpenAI, Anthropic and Google API keys, JWTs, PEM/OpenSSH/PGP and PuTTY private keys, credentials in URLs (`user:pass@` and token-only `token@`), JSON/dict-form auth and cookie headers, and `key=value` secrets with plain, double- or single-quoted keys. A corpus test checks every format against the text, JSON and SARIF reports.
 - **Reporters** for plain text, JSON and SARIF (for GitHub code scanning and IDEs).
 - **Stable exit codes** for CI.
 
