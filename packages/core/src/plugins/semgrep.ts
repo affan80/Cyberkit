@@ -4,15 +4,22 @@
  * (registry configs like `auto` or `p/...` fetch rules over the network),
  * and metrics and version checks are always disabled. The child is spawned
  * without a shell, its output is size-capped, and it is killed when the
- * scan aborts (timeout).
+ * scan aborts (timeout). The binary is resolved to an absolute path that is
+ * never inside the scanned tree, and the child runs with a cwd outside it
+ * (issue #47).
  */
 import { spawn } from "node:child_process";
 import { access } from "node:fs/promises";
 import path from "node:path";
 import { type Plugin, type PluginFindingInput, PluginError, definePlugin } from "./base.js";
+import { neutralCwd, resolveExecutable } from "./exec.js";
 
 export interface SemgrepOptions {
-  /** Path or name of the semgrep executable. */
+  /**
+   * Path or name of the semgrep executable. A bare name is looked up on the
+   * child's PATH, skipping empty/relative entries and anything inside the scan
+   * root; a path is used as given (resolved against the process cwd).
+   */
   readonly binary?: string;
   /** Local rule files/directories, relative to the scan root. Defaults to .semgrep.yml / .semgrep.yaml / .semgrep/. */
   readonly configs?: readonly string[];
@@ -123,11 +130,15 @@ export function createSemgrepPlugin(options: SemgrepOptions = {}): Plugin {
     name: "semgrep",
     async run(ctx) {
       const configs = await resolveConfigs(ctx.root, options.configs);
+      const env = options.env ?? { PATH: process.env.PATH ?? "" };
+      const name = options.binary ?? "semgrep";
+      const binary = await resolveExecutable(name, { pathEnv: env.PATH, root: ctx.root });
+      if (binary === undefined) throw new PluginError(`semgrep is not installed (binary not found on PATH: ${name})`);
       const raw = await runSemgrep(
-        options.binary ?? "semgrep",
+        binary,
         semgrepArgs(configs, ctx.root),
-        ctx.root,
-        options.env ?? { PATH: process.env.PATH ?? "" },
+        neutralCwd(),
+        env,
         ctx.signal,
         options.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES,
       );

@@ -119,6 +119,30 @@ describe("semgrep plugin (fake semgrep binary)", () => {
     expect(res.error).toMatch(/not installed|not found/i);
   });
 
+  it.runIf(process.platform !== "win32")("never runs a repo-supplied ./semgrep via '.' or an empty PATH entry (issue #47)", async () => {
+    const pwned = path.join(dir, "PWNED");
+    await writeFile(path.join(dir, "semgrep"), `#!/bin/sh\ntouch "${pwned}"\necho '{"results":[]}'\n`, { mode: 0o755 });
+    for (const PATH of ["/usr/bin:/bin:", ":/usr/bin:/bin", "/usr/bin::/bin", ".:/usr/bin:/bin"]) {
+      const res = await runPlugin(createSemgrepPlugin({ env: { PATH } }), await createScope(dir));
+      expect(res.status).toBe("error");
+      expect(res.error).toMatch(/not installed/);
+    }
+    await expect(readFile(pwned)).rejects.toThrow();
+  });
+
+  it("runs semgrep with a cwd outside the scanned tree, passing the target explicitly", async () => {
+    const outside = await realpath(await mkdtemp(path.join(tmpdir(), "cyberkit-semgrep-cwd-")));
+    try {
+      const cwdFile = path.join(outside, "cwd.txt");
+      const res = await run("results", { env: { FAKE_SEMGREP_MODE: "results", FAKE_SEMGREP_CWD_FILE: cwdFile, PATH: process.env.PATH ?? "" } });
+      expect(res.status).toBe("ok");
+      const cwd = await realpath(await readFile(cwdFile, "utf8"));
+      expect(path.relative(dir, cwd).startsWith("..")).toBe(true);
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
+
   it("reports a failing semgrep run with redacted stderr", async () => {
     const res = await run("fail");
     expect(res.status).toBe("error");
