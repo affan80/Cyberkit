@@ -175,11 +175,13 @@ for await (const event of scanStream({ target: "." })) {
 }
 ```
 
-The SDK and CLI give identical results, and a parity test enforces it. Other exports include `renderJson`, `renderSarif`, `createStore` (append-only JSONL), `createScope`, `redact`, `definePlugin`, `runPlugin` and `runPluginModule`.
+The SDK and CLI give identical results, and a parity test enforces it. Report order is locale-independent, so the same findings produce byte-identical text, JSON and SARIF on every machine. Other exports include `renderJson`, `renderSarif`, `createStore` (append-only JSONL), `createScope`, `redact`, `definePlugin`, `runPlugin` and `runPluginModule`.
 
 ## Roadmap
 
-All 22 tasks of the v0.1.0 test-driven plan are done: redaction, scope validation and scope files, the static no-network guard, config and CLI parsing, the findings store, the supply-chain engine and typosquat snapshot, plugin isolation and the Semgrep plugin, plain, JSON and SARIF reporters, exit codes, `scan()`, `scanStream()`, the CLI, the end-to-end and SDK/CLI parity test suites, and the docs. Next: publishing `@cyberkit/core` to npm and the `@cyberkit/tui` terminal UI.
+All 22 tasks of the v0.1.0 test-driven plan are done: redaction, scope validation and scope files, the static no-network guard, config and CLI parsing, the findings store, the supply-chain engine and typosquat snapshot, plugin isolation and the Semgrep plugin, plain, JSON and SARIF reporters, exit codes, `scan()`, `scanStream()`, the CLI, the end-to-end and SDK/CLI parity test suites, and the docs. The `@cyberkit/tui` terminal UI has shipped too. All findings from a red-team assessment have since been fixed: output and config symlinks, PATH hijacking, redaction gaps and ReDoS, TOCTOU reads, and unbounded plugin, store and scope-matching work. See [CHANGELOG.md](CHANGELOG.md).
+
+Next: publishing `@cyberkit/core` to npm.
 
 ## Contributing
 
