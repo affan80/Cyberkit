@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -104,6 +104,60 @@ describe("semgrep plugin (fake semgrep binary)", () => {
     const res = await run("empty", { configs: [config] });
     expect(res.status).toBe("error");
     expect(res.error).toMatch(/network|local/i);
+  });
+
+  describe("configs outside the scan root (#56)", () => {
+    let outside: string;
+    beforeEach(async () => {
+      outside = await realpath(await mkdtemp(path.join(tmpdir(), "cyberkit-semgrep-out-")));
+      await writeFile(path.join(outside, "rules.yml"), "rules: []\n");
+    });
+    afterEach(async () => {
+      await rm(outside, { recursive: true, force: true });
+    });
+    const calledSemgrep = () => readFile(argsFile, "utf8").then(() => true, () => false);
+
+    it.each([".semgrep.yml", ".semgrep.yaml", ".semgrep"])("refuses a default %s symlinked outside the root, without running semgrep", async (name) => {
+      await rm(path.join(dir, ".semgrep.yml"));
+      await symlink(name === ".semgrep" ? outside : path.join(outside, "rules.yml"), path.join(dir, name));
+      const res = await run("empty");
+      expect(res.status).toBe("error");
+      expect(res.error).toMatch(/outside the scan root/);
+      expect(await calledSemgrep()).toBe(false);
+    });
+
+    it("refuses a relative explicit config that escapes the root", async () => {
+      await symlink(path.join(outside, "rules.yml"), path.join(dir, "linked.yml"));
+      for (const configs of [["linked.yml"], ["../x.yml"]]) {
+        const res = await run("empty", { configs });
+        expect(res.status).toBe("error");
+        expect(res.error).toMatch(/outside the scan root/);
+      }
+      expect(await calledSemgrep()).toBe(false);
+    });
+
+    it("refuses a config excluded by the scope", async () => {
+      const res = await runPlugin(
+        createSemgrepPlugin({ binary: FAKE, env: { FAKE_SEMGREP_MODE: "empty", FAKE_SEMGREP_ARGS_FILE: argsFile, PATH: process.env.PATH ?? "" } }),
+        await createScope(dir, { exclude: [".semgrep.yml"] }),
+      );
+      expect(res.status).toBe("error");
+      expect(await calledSemgrep()).toBe(false);
+    });
+
+    it("still allows an absolute explicit config (the caller's own choice)", async () => {
+      const res = await run("empty", { configs: [path.join(outside, "rules.yml")] });
+      expect(res.status).toBe("ok");
+    });
+
+    it("passes the resolved real path of an in-scope config", async () => {
+      await mkdir(path.join(dir, "rules"));
+      await writeFile(path.join(dir, "rules", "a.yml"), "rules: []\n");
+      await symlink(path.join(dir, "rules", "a.yml"), path.join(dir, "alias.yml"));
+      await run("empty", { configs: ["alias.yml"] });
+      const args = JSON.parse((await readFile(argsFile, "utf8")).trim()) as string[];
+      expect(args[args.indexOf("--config") + 1]).toBe(path.join(dir, "rules", "a.yml"));
+    });
   });
 
   it("errors clearly when there is no local config", async () => {

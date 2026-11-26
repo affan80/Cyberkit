@@ -28,6 +28,13 @@ export interface PluginContext {
   readonly root: string;
   /** Aborted when the plugin times out; long-running work should stop. */
   readonly signal: AbortSignal;
+  /**
+   * Canonical path for a root-relative (or absolute) path, resolved through
+   * the scan scope: rejects anything outside the root, including via symlinks
+   * (and, for in-process plugins, paths excluded by the scope). Use it for
+   * every file a plugin reads or hands to a tool (#56).
+   */
+  resolve(input: string): Promise<string>;
 }
 
 export interface Plugin {
@@ -209,7 +216,7 @@ const TIMED_OUT: unique symbol = Symbol("timeout");
 export async function runPlugin(plugin: Plugin, scope: Scope, options: RunOptions = {}): Promise<PluginRunResult> {
   const start = performance.now();
   const controller = new AbortController();
-  const ctx: PluginContext = Object.freeze({ root: scope.root, signal: controller.signal });
+  const ctx: PluginContext = Object.freeze({ root: scope.root, signal: controller.signal, resolve: scope.resolve });
   let timer: NodeJS.Timeout | undefined;
   const timeout = new Promise<typeof TIMED_OUT>((resolve) => {
     timer = setTimeout(() => resolve(TIMED_OUT), options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
@@ -233,6 +240,16 @@ export async function runPlugin(plugin: Plugin, scope: Scope, options: RunOption
 // Plain JS evaluated inside the worker, so it works from both src (tests) and dist.
 const WORKER_SOURCE = `
 const { parentPort, workerData } = require("node:worker_threads");
+const fs = require("node:fs/promises");
+const nodePath = require("node:path");
+// Same containment rule as scope.resolve(): realpath, then must be inside the root.
+const resolve = async (input) => {
+  if (typeof input !== "string" || input.length === 0 || input.includes("\\0")) throw new Error("invalid path");
+  const real = await fs.realpath(nodePath.resolve(workerData.root, input));
+  const rel = nodePath.relative(workerData.root, real);
+  if (rel === ".." || rel.startsWith(".." + nodePath.sep) || nodePath.isAbsolute(rel)) throw new Error("path is outside the scan scope");
+  return real;
+};
 const text = (e) => (e && e.message) ? String(e.message) : String(e);
 (async () => {
   let mod;
@@ -245,7 +262,7 @@ const text = (e) => (e && e.message) ? String(e.message) : String(e);
   }
   try {
     const signal = new AbortController().signal;
-    let output = await plugin.run(Object.freeze({ root: workerData.root, signal }));
+    let output = await plugin.run(Object.freeze({ root: workerData.root, signal, resolve }));
     // Only send what the host will examine, so a huge array isn't cloned across.
     if (Array.isArray(output) && output.length > workerData.maxItems) output = Array.prototype.slice.call(output, 0, workerData.maxItems);
     parentPort.postMessage({ type: "result", name: plugin.name, output });
