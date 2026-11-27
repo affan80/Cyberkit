@@ -9,6 +9,8 @@ Fixes from the red-team assessment of `dev` (issues #46–#57 and #60).
 ### Added
 
 - **Developer console** (`npm run ui` / `npx cyberkit-dev`, private package `packages/dev`): a lazygit-style terminal UI that runs every npm script in the repo and its packages, the `verify` chain (lint → typecheck → build → test, as in CI) and a repo scan. It caches every run (log + error log) under `node_modules/.cache/cyberkit-dev`, and extracts an error log per run (TypeScript, ESLint, vitest failures, uncaught exceptions, npm failures) with jump-to-error. Non-interactive modes: `--list`, `--run <id>`, `--errors`, `--history`, `--clear-history`, `--frame`. Output is escape-stripped and redacted before display and before it is cached; cancel kills the whole process tree.
+- README: a "Commands at a glance" table, `npm run ui -- <option>` examples for every console mode, and a troubleshooting table (e.g. `Missing script: "ui"` on an old checkout).
+- `npm run ui` runs `node packages/dev/bin/cyberkit-dev` instead of the `cyberkit-dev` link, so it works even if `npm install` wasn't re-run after pulling. A test fails if any root script or any `npm run`/console flag in the README points at something that doesn't exist.
 
 ### Security
 

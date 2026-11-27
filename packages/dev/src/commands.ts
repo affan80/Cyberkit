@@ -60,6 +60,13 @@ export function npmArgv(script: string, platform: NodeJS.Platform = process.plat
   return platform === "win32" ? ["cmd.exe", "/d", "/s", "/c", "npm", "run", script] : ["npm", "run", script];
 }
 
+/** `cyberkit-dev ...` or `node <path>/cyberkit-dev ...`: a script that opens this console. */
+function opensConsole(body: string): boolean {
+  const [cmd, arg] = body.trim().split(/\s+/);
+  const isConsole = (word: string | undefined) => word !== undefined && /(^|[\\/])cyberkit-dev$/.test(word);
+  return isConsole(cmd) || (cmd === "node" && isConsole(arg));
+}
+
 function scriptsOf(pkg: PackageJson): Array<[string, string]> {
   const raw = pkg.scripts;
   if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return [];
@@ -67,7 +74,7 @@ function scriptsOf(pkg: PackageJson): Array<[string, string]> {
   const names = new Set(entries.map(([n]) => n));
   return entries.filter(([name, body]) => {
     if (LIFECYCLE.has(name)) return false;
-    if (body.trim().split(/\s+/)[0] === "cyberkit-dev") return false; // the console itself (needs a TTY of its own)
+    if (opensConsole(body)) return false; // the console itself (needs a TTY of its own)
     if (!SCRIPT_NAME.test(name)) return false;
     const hook = /^(pre|post)(.+)$/.exec(name);
     if (hook && names.has(hook[2] as string)) return false;

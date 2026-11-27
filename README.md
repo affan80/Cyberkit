@@ -65,6 +65,27 @@ Then run the CLI from the repo with `npx cyberkit ...`, or point at any project:
 
 Working on CyberKit itself? `npm run ui` opens the [developer console](#developer-console): every build, lint, typecheck, test and scan command on one screen, with a history and an error log for each run.
 
+Already have a clone? Update it before using the newer commands (`npm run ui` only exists on `dev` and `main` from the console's merge on):
+
+```bash
+git switch dev && git pull
+npm install && npm run build
+```
+
+### Commands at a glance
+
+| Command | What it does |
+|---|---|
+| `npm install` | Install dependencies and link the `cyberkit`, `cyberkit-tui` and `cyberkit-dev` commands |
+| `npm run build` | Compile every package (needed before the commands below) |
+| `npm test` | Build and run every package's tests |
+| `npm run lint` | ESLint over the whole repo |
+| `npm run typecheck` | Type-check every package |
+| `npm run ui` | Open the [developer console](#developer-console) (add `-- --list`, `-- --run <id>`, … for its non-interactive modes) |
+| `npx cyberkit scan [target]` | Scan a project and print a report ([CLI](#cli)) |
+| `npx cyberkit-tui [target]` | Scan a project in the interactive [terminal UI](#terminal-ui) |
+| `npx cyberkit-dev [options]` | The developer console's own command; the same as `npm run ui --` |
+
 ## Usage
 
 ### CLI
@@ -233,9 +254,11 @@ The SDK and CLI give identical results, and a parity test enforces it. Report or
 For working on CyberKit itself there is a lazygit-style console that runs every project command from one screen, keeps a history of every run and pulls out the errors of each one.
 
 ```bash
-npm run build   # once
+npm run build   # once, and again after pulling
 npm run ui      # or: npx cyberkit-dev
 ```
+
+`npm run ui` runs `node packages/dev/bin/cyberkit-dev`, so it works even when `npm install` hasn't been re-run since the console was added.
 
 ```text
  CyberKit dev console · cyberkit                                                      idle · 2 runs
@@ -286,12 +309,25 @@ npm run ui      # or: npx cyberkit-dev
 It also works without the UI, for scripts and quick checks:
 
 ```bash
-npx cyberkit-dev --list               # what it can run
-npx cyberkit-dev --run chain:verify   # run without the UI, print the error log, exit with the command's code
-npx cyberkit-dev --errors             # the error log of the latest run (or: --errors <run id>)
-npx cyberkit-dev --history            # recent runs
-npx cyberkit-dev --clear-history      # delete the cache
+npm run ui -- --list                  # what it can run
+npm run ui -- --run chain:verify      # run without the UI, print the error log, exit with the command's code
+npm run ui -- --run core:test         # any id from --list: root:lint, tui:build, tool:scan, ...
+npm run ui -- --errors                # the error log of the latest run (or: --errors <run id>)
+npm run ui -- --history               # recent runs
+npm run ui -- --clear-history         # delete the cache
+npm run ui -- --frame --cols 120 --rows 30 --keys 'jj'   # print one frame of the UI and exit (runs nothing)
 ```
+
+`npx cyberkit-dev <options>` does the same. `--cwd <dir>` points it at another checkout and `--cache-dir <dir>` keeps runs somewhere else.
+
+**Troubleshooting**
+
+| You see | Why | Fix |
+|---|---|---|
+| `npm error Missing script: "ui"` | The checkout is on a branch from before the console was merged | `git switch dev && git pull && npm install && npm run build` |
+| `cyberkit-dev: not built yet` | `packages/dev/dist` doesn't exist | `npm run build` |
+| `needs an interactive terminal` | stdin or stdout isn't a terminal (CI, a pipe, an editor task) | Use `--list`, `--run <id>` or `--frame` instead |
+| `Terminal too small (need 70×18)` | The window is smaller than the layout | Make the window bigger |
 
 Commands are spawned without a shell. Their output is stripped of terminal escape sequences and redacted before it is shown or written to the cache, so a test that prints a token doesn't leave it in a log. The console is a private workspace package (`packages/dev`) and is not published.
 
