@@ -13,7 +13,7 @@
     "build": "npm run build --workspaces --if-present",
     "test": "npm test --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "ui": "cyberkit-dev"
+    "ui": "node packages/dev/bin/cyberkit-dev"
   },
   "devDependencies": {
     "@eslint/js": "^9.0.0",

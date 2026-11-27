@@ -57,7 +57,7 @@ describe("discoverCommands", () => {
   });
 
   it("hides scripts that open the console itself", async () => {
-    await pkg(root, { scripts: { ui: "cyberkit-dev", "ui:frame": "cyberkit-dev --frame", test: "vitest" } });
+    await pkg(root, { scripts: { ui: "cyberkit-dev", "ui:frame": "cyberkit-dev --frame", "ui:node": "node packages/dev/bin/cyberkit-dev", "ui:win": "node packages\\dev\\bin\\cyberkit-dev --list", test: "vitest" } });
     expect((await discoverCommands(root)).map((c) => c.id)).toEqual(["chain:verify", "root:test"]);
   });
 
