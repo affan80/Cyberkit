@@ -3,8 +3,6 @@
  * main() is pure apart from the injected IO and the scan itself, so it is
  * fully testable; run() binds it to the real process.
  */
-import { mkdir, writeFile } from "node:fs/promises";
-import path from "node:path";
 import type { Finding } from "../finding.js";
 import { redact } from "../redaction.js";
 import { renderJson } from "../reporters/json.js";
@@ -15,6 +13,7 @@ import { VERSION } from "../version.js";
 import { type Config, ConfigError } from "./config.js";
 import { EXIT, type ExitCode, exitCodeForError } from "./exit.js";
 import { parseCliArgs } from "./parse.js";
+import { writeFileNoFollow } from "./safe-write.js";
 
 export interface CliIO {
   readonly stdout: { write(chunk: string): unknown };
@@ -64,8 +63,9 @@ export async function main(argv: readonly string[], io: CliIO): Promise<ExitCode
     if (config.output === undefined) {
       io.stdout.write(report);
     } else {
-      await mkdir(path.dirname(path.resolve(config.output)), { recursive: true });
-      await writeFile(config.output, report);
+      // The scanned tree (and usually the cwd) is untrusted: never follow a
+      // symlink planted there to write outside it (issue #46).
+      await writeFileNoFollow(config.output, report, { untrustedRoots: [process.cwd(), config.target] });
     }
     return result.exitCode;
   } catch (e) {
@@ -75,11 +75,16 @@ export async function main(argv: readonly string[], io: CliIO): Promise<ExitCode
   }
 }
 
+/** Write errors that only mean the reader of stdout went away. */
+const READER_GONE = new Set(["EPIPE", "ENOTCONN", "ECONNRESET"]);
+
 /** Binds main() to the real process. Uses process.exitCode so output always flushes. */
 export async function run(argv: readonly string[] = process.argv.slice(2)): Promise<void> {
-  // `cyberkit ... | head` closes the pipe early; that is not an error.
+  // `cyberkit ... | head` closes the pipe early; that is not an error. Pipes
+  // report EPIPE; socketpair stdio (child processes on macOS) can report
+  // ENOTCONN or ECONNRESET for the same thing.
   process.stdout.on("error", (e: NodeJS.ErrnoException) => {
-    if (e.code !== "EPIPE") throw e;
+    if (!READER_GONE.has(e.code ?? "")) throw e;
   });
   process.exitCode = await main(argv, { stdout: process.stdout, stderr: process.stderr, isTTY: process.stdout.isTTY === true, env: process.env });
 }

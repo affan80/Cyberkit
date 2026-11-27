@@ -7,7 +7,8 @@
  */
 import { lstat, realpath, stat } from "node:fs/promises";
 import path from "node:path";
-import { compileGlob, loadScopeFile, parseScopeConfig } from "./scope-file.js";
+import { readFileAtomic } from "./safe-read.js";
+import { compileGlobSet, loadScopeFile, parseScopeConfig } from "./scope-file.js";
 
 export class ScopeError extends Error {
   override readonly name = "ScopeError";
@@ -18,6 +19,14 @@ export interface Scope {
   readonly root: string;
   /** Canonical absolute path for `input`, or throws ScopeError if it is outside the scope. */
   resolve(input: string): Promise<string>;
+  /**
+   * Reads an in-scope file as UTF-8 through a single descriptor, so the file
+   * that was checked is the file that is read (no symlink swap in between) and
+   * at most `maxBytes` are ever read. Throws ScopeError when the path is out of
+   * scope, FileTooLargeError over the cap, UnsafeReadError if the file changed
+   * while being opened, and the usual ENOENT error when it doesn't exist.
+   */
+  readFile(input: string, options: { readonly maxBytes: number }): Promise<string>;
   /** Like resolve(), but returns a boolean and never throws. */
   contains(input: string): Promise<boolean>;
   /** Effective include patterns (empty means everything). */
@@ -88,21 +97,24 @@ export async function createScope(rootInput: string, options: ScopeOptions = {})
   const explicit = parseScopeConfig({ version: 1, include: options.include ?? [], exclude: options.exclude ?? [] });
   const include = Object.freeze([...(options.include === undefined ? fromFile.include : explicit.include)]);
   const exclude = Object.freeze([...fromFile.exclude, ...explicit.exclude]);
-  const includeMatchers = include.map(compileGlob);
-  const excludeMatchers = exclude.map(compileGlob);
+  const includeSet = compileGlobSet(include);
+  const excludeSet = compileGlobSet(exclude);
 
   // A path is excluded if it, or any directory above it, matches an exclude;
-  // with includes, it (or a directory above it) must match an include.
+  // with includes, it (or a directory above it) must match an include. Each
+  // pattern is tested once per path, and recent answers are cached (#54).
+  const cache = new Map<string, boolean>();
+  const CACHE_LIMIT = 10_000;
   const isExcluded = (relPath: string): boolean => {
+    const cached = cache.get(relPath);
+    if (cached !== undefined) return cached;
     const parts = relPath.split("/").filter((p) => p !== "" && p !== ".");
-    if (parts.length === 0) return false; // the root itself is always in scope
-    let included = includeMatchers.length === 0;
-    for (let i = 1; i <= parts.length; i++) {
-      const prefix = parts.slice(0, i).join("/");
-      if (excludeMatchers.some((m) => m.test(prefix))) return true;
-      if (!included && includeMatchers.some((m) => m.test(prefix))) included = true;
-    }
-    return !included;
+    const excluded =
+      parts.length > 0 && // the root itself is always in scope
+      (excludeSet.matchesSelfOrAncestor(parts) || (include.length > 0 && !includeSet.matchesSelfOrAncestor(parts)));
+    if (cache.size >= CACHE_LIMIT) cache.clear();
+    cache.set(relPath, excluded);
+    return excluded;
   };
 
   const inside = (real: string): boolean => {
@@ -124,5 +136,8 @@ export async function createScope(rootInput: string, options: ScopeOptions = {})
       () => false,
     );
 
-  return Object.freeze({ root, resolve, contains, include, exclude, isExcluded });
+  const readFile = async (input: string, options: { readonly maxBytes: number }): Promise<string> =>
+    readFileAtomic(await resolve(input), options.maxBytes);
+
+  return Object.freeze({ root, resolve, contains, readFile, include, exclude, isExcluded });
 }

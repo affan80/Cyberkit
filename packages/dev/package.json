@@ -1,0 +1,25 @@
+{
+  "name": "@cyberkit/dev",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Lazygit-style developer console for the CyberKit repo: run every script, keep a history of runs and see their errors",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "cyberkit-dev": "bin/cyberkit-dev"
+  },
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "build": "tsc -p ../core/tsconfig.build.json && tsc -p ../tui/tsconfig.build.json && tsc -p tsconfig.build.json",
+    "pretest": "npm run build",
+    "test": "vitest run",
+    "typecheck": "tsc -p ../core/tsconfig.build.json && tsc -p ../tui/tsconfig.build.json && tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@cyberkit/core": "0.1.0",
+    "@cyberkit/tui": "0.1.0"
+  }
+}

@@ -100,7 +100,7 @@ describe("cyberkit CLI (real binary, end to end)", () => {
     expect((await runCli(["scan", await project({ left: "*" })])).stdout).not.toContain("\u001b[");
   });
 
-  it("does not crash when the reader closes the pipe early (EPIPE)", async () => {
+  it("does not crash when the reader closes the pipe early (EPIPE, or ENOTCONN on macOS)", async () => {
     const deps: Record<string, string> = {};
     for (let i = 0; i < 3000; i++) deps[`dep${i}`] = "*";
     const dir = await project(deps);

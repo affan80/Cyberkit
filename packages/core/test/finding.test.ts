@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { REDACTED } from "../src/redaction.js";
 import { FindingError, SEVERITIES, createFinding, verifyFinding } from "../src/finding.js";
@@ -45,6 +46,22 @@ describe("createFinding", () => {
     expect(JSON.stringify(f)).not.toContain(GH);
   });
 
+  it.each([
+    ["ruleId", { ruleId: `custom.${GH}` }],
+    ["file", { file: `config/${GH}.env` }],
+    ["engine", { engine: `plugin:${GH}` }],
+  ])("redacts secrets in %s too (#55)", (field, patch) => {
+    const f = createFinding({ ...base, ...patch });
+    expect(f[field as "ruleId" | "file" | "engine"]).toContain(REDACTED);
+    expect(JSON.stringify(f)).not.toContain(GH);
+  });
+
+  it("keeps ordinary rule ids and paths unchanged", () => {
+    const f = createFinding({ ...base, ruleId: "generic.secrets.security.detected-aws-access-key-id", file: "src/auth/token.ts" });
+    expect(f.ruleId).toBe("generic.secrets.security.detected-aws-access-key-id");
+    expect(f.file).toBe("src/auth/token.ts");
+  });
+
   it("derives the id from redacted content, so secrets never influence it", () => {
     const a = createFinding({ ...base, message: "key password=aaaa" });
     const b = createFinding({ ...base, message: "key password=bbbb" });
@@ -89,6 +106,13 @@ describe("verifyFinding", () => {
     const o = JSON.parse(JSON.stringify(createFinding(base)));
     o.message = "tampered";
     expect(() => verifyFinding(o)).toThrow(FindingError);
+  });
+
+  it.each(["ruleId", "file", "engine", "message", "evidence"])("rejects a stored finding with a secret in %s, even with a matching id (#55)", (field) => {
+    const body: Record<string, unknown> = { ...base, evidence: "e", [field]: `x ${GH}` };
+    const canonical = JSON.stringify([body.engine, body.ruleId, body.severity, body.file ?? null, body.line ?? null, body.message]);
+    const forged = { ...body, id: createHash("sha256").update(canonical).digest("hex") };
+    expect(() => verifyFinding(forged)).toThrow(/unredacted secrets/);
   });
 
   it.each([null, 5, "x", [], {}])("rejects non-finding value %j", (v) => {

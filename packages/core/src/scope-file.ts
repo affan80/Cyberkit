@@ -4,7 +4,8 @@
  * The format is documented in docs/SCOPE.md and docs/scope.schema.json; a
  * test keeps that schema and this validator in agreement.
  */
-import { readFile, realpath, stat } from "node:fs/promises";
+import { realpath } from "node:fs/promises";
+import { FileTooLargeError, readFileAtomic } from "./safe-read.js";
 import path from "node:path";
 import { ConfigError } from "./cli/config.js";
 
@@ -68,11 +69,17 @@ export async function loadScopeFile(root: string): Promise<ScopeConfig> {
   if (rel === ".." || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)) {
     throw new ScopeFileError(`${SCOPE_FILE} must not point outside the scan root`);
   }
-  if ((await stat(real)).size > MAX_FILE_BYTES) throw new ScopeFileError(`${SCOPE_FILE} is larger than ${MAX_FILE_BYTES} bytes`);
+  let text: string;
+  try {
+    text = await readFileAtomic(real, MAX_FILE_BYTES); // no TOCTOU between the check above and the read (#51)
+  } catch (e) {
+    if (e instanceof FileTooLargeError) throw new ScopeFileError(`${SCOPE_FILE} is larger than ${MAX_FILE_BYTES} bytes`);
+    throw new ScopeFileError(`${SCOPE_FILE}: cannot be read`);
+  }
 
   let json: unknown;
   try {
-    json = JSON.parse(await readFile(real, "utf8"));
+    json = JSON.parse(text);
   } catch {
     throw new ScopeFileError(`${SCOPE_FILE}: invalid JSON`);
   }
@@ -112,30 +119,179 @@ function matchSegment(pattern: string, text: string): boolean {
   return p === pattern.length;
 }
 
+/** Reusable DP table, grown on demand: no allocation per match (#54). */
+let table = new Uint8Array(256);
+
+/**
+ * Whether glob segments `pat` match path segments `parts` exactly. Bottom-up
+ * DP over (pattern segment, path segment): O(|pat| x |parts|) segment tests,
+ * polynomial even for hostile patterns, with no recursion or per-call Map.
+ */
+function matchSegments(pat: readonly string[], parts: readonly string[]): boolean {
+  const m = pat.length;
+  const n = parts.length;
+  const width = n + 1;
+  const size = (m + 1) * width;
+  if (table.length < size) table = new Uint8Array(Math.max(size, table.length * 2));
+  const dp = table;
+  for (let si = 0; si < n; si++) dp[m * width + si] = 0;
+  dp[m * width + n] = 1;
+  for (let pi = m - 1; pi >= 0; pi--) {
+    const seg = pat[pi] as string;
+    const row = pi * width;
+    const next = row + width;
+    for (let si = n; si >= 0; si--) {
+      if (seg === "**") dp[row + si] = dp[next + si] || (si < n && dp[row + si + 1]) ? 1 : 0;
+      else dp[row + si] = si < n && dp[next + si + 1] && matchSegment(seg, parts[si] as string) ? 1 : 0;
+    }
+  }
+  return dp[0] === 1;
+}
+
+const segmentsOf = (pattern: string): string[] => pattern.replace(/\/+$/, "").split("/");
+
 /**
  * Compiles a glob: `*` and `?` stay within one segment, `**` spans any number
- * of segments (including none). A trailing `/` is ignored. Matching is
- * memoised over (pattern segment, path segment), so it is polynomial even for
- * hostile patterns.
+ * of segments (including none). A trailing `/` is ignored.
  */
 export function compileGlob(pattern: string): GlobMatcher {
-  const pat = pattern.replace(/\/+$/, "").split("/");
+  const pat = segmentsOf(pattern);
+  return { test: (relPath: string): boolean => matchSegments(pat, relPath.split("/")) };
+}
+
+export interface GlobSetMatcher {
+  /** Whether the path, or any directory above it, matches at least one pattern. */
+  matchesSelfOrAncestor(parts: readonly string[]): boolean;
+}
+
+/**
+ * 64-bit "which characters occur" signature (code % 64) as [low, high] 32-bit
+ * halves. A segment glob can only match text containing all of its literal
+ * characters, so comparing signatures rejects most pairs in a couple of ns.
+ */
+function charSignature(text: string, skipWildcards: boolean): [number, number] {
+  let lo = 0;
+  let hi = 0;
+  for (let i = 0; i < text.length; i++) {
+    const c = text.charCodeAt(i);
+    if (skipWildcards && (c === 0x2a || c === 0x3f)) continue; // "*" "?"
+    const bit = c & 63;
+    if (bit < 32) lo |= 1 << bit;
+    else hi |= 1 << (bit - 32);
+  }
+  return [lo, hi];
+}
+
+/** Paths up to this depth use the bitset matcher (positions 0..depth fit in 31 bits). */
+const BITSET_MAX_DEPTH = 30;
+
+/**
+ * Compiles a pattern list for "this path or one of its ancestors matches"
+ * queries (#54). Per path:
+ * - a pattern matches some ancestor-or-self iff `pattern/**` matches the path,
+ *   so each pattern is tested once, not once per directory prefix;
+ * - patterns without wildcards are a Set lookup per prefix, O(depth);
+ * - wildcard patterns run as a bitset NFA over path positions: one bitwise step
+ *   per pattern segment. Each distinct pattern segment is tested at most once
+ *   per distinct path segment (repo paths repeat names like "src"), memoised
+ *   in a reused typed array.
+ */
+export function compileGlobSet(patterns: readonly string[]): GlobSetMatcher {
+  const literals = new Set<string>();
+  const globs: string[][] = [];
+  const segIds = new Map<string, number>();
+  const segs: string[] = [];
+  const compiled: Int32Array[] = []; // per glob: segment ids, -1 for "**"
+  for (const pattern of patterns) {
+    const pat = segmentsOf(pattern);
+    if (!pat.some((seg) => seg.includes("*") || seg.includes("?"))) {
+      literals.add(pat.join("/"));
+      continue;
+    }
+    const full = [...pat, "**"];
+    globs.push(full);
+    compiled.push(
+      Int32Array.from(full, (seg) => {
+        if (seg === "**") return -1;
+        let id = segIds.get(seg);
+        if (id === undefined) {
+          id = segs.length;
+          segs.push(seg);
+          segIds.set(seg, id);
+        }
+        return id;
+      }),
+    );
+  }
+  const segSigs = segs.map((seg) => charSignature(seg, true));
+  let memo = new Uint8Array(0); // [segId * uniqueCount + u]: 0 unknown, 1 no, 2 yes
+
+  const matchBitset = (parts: readonly string[]): boolean => {
+    const n = parts.length;
+    const full = (1 << (n + 1)) - 1;
+    // Distinct path segments and the positions where each occurs.
+    const uniqueOf = new Map<string, number>();
+    const uniques: string[] = [];
+    const positions: number[] = [];
+    for (let si = 0; si < n; si++) {
+      const part = parts[si] as string;
+      let u = uniqueOf.get(part);
+      if (u === undefined) {
+        u = uniques.length;
+        uniqueOf.set(part, u);
+        uniques.push(part);
+        positions.push(0);
+      }
+      positions[u] = (positions[u] as number) | (1 << si);
+    }
+    const k = uniques.length;
+    const partSigs = uniques.map((part) => charSignature(part, false));
+    const size = segs.length * k;
+    if (memo.length < size) memo = new Uint8Array(Math.max(size, memo.length * 2));
+    else memo.fill(0, 0, size);
+
+    for (const pat of compiled) {
+      let state = 1; // bit si: pattern prefix consumed parts[0..si)
+      for (let pi = 0; pi < pat.length && state !== 0; pi++) {
+        const id = pat[pi] as number;
+        if (id === -1) {
+          state = (state | -(state & -state)) & full; // "**": every position from the lowest reachable one
+          continue;
+        }
+        let mask = 0;
+        const row = id * k;
+        for (let u = 0; u < k; u++) {
+          let known = memo[row + u] as number;
+          if (known === 0) {
+            const [slo, shi] = segSigs[id] as [number, number];
+            const [plo, phi] = partSigs[u] as [number, number];
+            const possible = ((slo & ~plo) | (shi & ~phi)) === 0;
+            known = possible && matchSegment(segs[id] as string, uniques[u] as string) ? 2 : 1;
+            memo[row + u] = known;
+          }
+          if (known === 2) mask |= positions[u] as number;
+        }
+        state = ((state & mask) << 1) & full;
+      }
+      if ((state >>> n) & 1) return true;
+    }
+    return false;
+  };
+
   return {
-    test(relPath: string): boolean {
-      const parts = relPath.split("/");
-      const memo = new Map<number, boolean>();
-      const match = (pi: number, si: number): boolean => {
-        const key = pi * (parts.length + 1) + si;
-        const cached = memo.get(key);
-        if (cached !== undefined) return cached;
-        let result: boolean;
-        if (pi === pat.length) result = si === parts.length;
-        else if (pat[pi] === "**") result = match(pi + 1, si) || (si < parts.length && match(pi, si + 1));
-        else result = si < parts.length && matchSegment(pat[pi] as string, parts[si] as string) && match(pi + 1, si + 1);
-        memo.set(key, result);
-        return result;
-      };
-      return match(0, 0);
+    matchesSelfOrAncestor(parts) {
+      if (parts.length === 0) return false;
+      if (literals.size > 0) {
+        let prefix = "";
+        for (const part of parts) {
+          prefix = prefix === "" ? part : `${prefix}/${part}`;
+          if (literals.has(prefix)) return true;
+        }
+      }
+      if (globs.length === 0) return false;
+      if (parts.length <= BITSET_MAX_DEPTH) return matchBitset(parts);
+      for (const pat of globs) if (matchSegments(pat, parts)) return true;
+      return false;
     },
   };
 }

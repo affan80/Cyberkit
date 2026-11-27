@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createFinding } from "../src/finding.js";
-import { StoreError, createStore } from "../src/store.js";
+import { MAX_RECORD_BYTES, StoreError, createStore } from "../src/store.js";
 
 let dir: string;
 let file: string;
@@ -101,5 +101,47 @@ describe("createStore", () => {
 
   it("rejects an empty path", () => {
     expect(() => createStore("")).toThrow(StoreError);
+  });
+});
+
+describe("createStore: bounded reads (#57)", () => {
+  it("rejects an over-long record without buffering it", async () => {
+    await writeFile(file, `${JSON.stringify(mk(1))}\n{"note":"password=${"x".repeat(50 * 1024 * 1024)}"`);
+    const store = createStore(file);
+    const before = process.memoryUsage().rss;
+    await expect(store.readAll()).rejects.toThrow(new StoreError(`record at line 2 exceeds ${MAX_RECORD_BYTES} bytes`));
+    expect(process.memoryUsage().rss - before).toBeLessThan(40 * 1024 * 1024);
+  });
+
+  it("splits records correctly across read-chunk boundaries (multi-byte UTF-8 included)", async () => {
+    // Many records so line boundaries land at every offset within read chunks.
+    const findings = Array.from({ length: 3000 }, (_, i) => createFinding({ engine: "e", ruleId: "r", severity: "low", message: "é".repeat(i % 97) + i }));
+    const store = createStore(file);
+    await store.appendMany(findings);
+    const back = await store.readAll();
+    expect(back.map((f) => f.id)).toEqual(findings.map((f) => f.id));
+    expect(await store.count()).toBe(3000);
+  });
+
+  it("handles CRLF line endings, blank lines and a missing trailing newline", async () => {
+    await writeFile(file, `${JSON.stringify(mk(1))}\r\n\r\n\n${JSON.stringify(mk(2))}`);
+    const store = createStore(file);
+    expect((await store.readAll()).map((f) => f.ruleId)).toEqual(["r1", "r2"]);
+    expect(await store.count()).toBe(2);
+  });
+
+  it("does not echo record content in JSON errors", async () => {
+    await writeFile(file, '{"note": xxxxxxxx-secret-ish}\n');
+    await expect(createStore(file).readAll()).rejects.toThrow(new StoreError("corrupt record at line 1: invalid JSON"));
+  });
+
+  it("refuses to write a record it could not read back", async () => {
+    const huge = createFinding({ engine: "e", ruleId: "r", severity: "low", message: "m".repeat(MAX_RECORD_BYTES) });
+    await expect(createStore(file).append(huge)).rejects.toThrow(/exceeds/);
+  });
+
+  it("counts records without buffering long lines", async () => {
+    await writeFile(file, `${"x".repeat(5 * MAX_RECORD_BYTES)}\n${JSON.stringify(mk(1))}\n`);
+    expect(await createStore(file).count()).toBe(2);
   });
 });

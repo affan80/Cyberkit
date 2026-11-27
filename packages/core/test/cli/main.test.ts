@@ -1,4 +1,4 @@
-import { access, constants, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { access, constants, mkdir, mkdtemp, readdir, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -139,6 +139,27 @@ describe("main(): errors", () => {
     const t = io();
     expect(await main(["scan", path.join(dir, "missing")], t.io)).toBe(EXIT.SCAN_ERROR);
     expect(t.err()).toMatch(/^cyberkit: /);
+  });
+
+  it("exits 3 and leaves the file alone when --output is a symlink planted in the scanned repo (issue #46)", async () => {
+    await project({ left: "*" });
+    const outside = await realpath(await mkdtemp(path.join(tmpdir(), "cyberkit-victim-")));
+    try {
+      const victim = path.join(outside, "authorized_keys");
+      await writeFile(victim, "ssh-ed25519 AAAA-original-key\n");
+      await symlink(victim, path.join(dir, "cyberkit.sarif"));
+      await symlink(outside, path.join(dir, "reports"));
+
+      const t = io();
+      expect(await main(["scan", dir, "-f", "sarif", "-o", path.join(dir, "cyberkit.sarif")], t.io)).toBe(EXIT.SCAN_ERROR);
+      expect(t.err()).toMatch(/^cyberkit: refusing to write the report through a symbolic link/);
+      expect(await main(["scan", dir, "-f", "json", "-o", path.join(dir, "reports", "out.json")], io().io)).toBe(EXIT.SCAN_ERROR);
+
+      expect(await readFile(victim, "utf8")).toBe("ssh-ed25519 AAAA-original-key\n");
+      expect(await readdir(outside)).toEqual(["authorized_keys"]);
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
   });
 
   it("exits 3 when the output file cannot be written", async () => {

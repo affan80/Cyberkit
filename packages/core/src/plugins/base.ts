@@ -28,6 +28,13 @@ export interface PluginContext {
   readonly root: string;
   /** Aborted when the plugin times out; long-running work should stop. */
   readonly signal: AbortSignal;
+  /**
+   * Canonical path for a root-relative (or absolute) path, resolved through
+   * the scan scope: rejects anything outside the root, including via symlinks
+   * (and, for in-process plugins, paths excluded by the scope). Use it for
+   * every file a plugin reads or hands to a tool (#56).
+   */
+  resolve(input: string): Promise<string>;
 }
 
 export interface Plugin {
@@ -43,7 +50,7 @@ export interface PluginRunResult {
   readonly findings: readonly Finding[];
   /** Items the plugin returned that were invalid or outside the scope. */
   readonly skipped: number;
-  /** True when output exceeded maxFindings and was cut. */
+  /** True when output exceeded maxFindings or maxItems and was cut. */
   readonly truncated: boolean;
   /** Redacted error description for non-ok statuses. */
   readonly error?: string;
@@ -53,6 +60,11 @@ export interface PluginRunResult {
 export interface RunOptions {
   readonly timeoutMs?: number;
   readonly maxFindings?: number;
+  /**
+   * Maximum output items examined, valid or not (default: 2 x maxFindings).
+   * Bounds the work a plugin can cause by returning junk or out-of-scope items.
+   */
+  readonly maxItems?: number;
 }
 
 export interface ModuleRunOptions extends RunOptions {
@@ -70,6 +82,13 @@ const NAME = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 const DEFAULT_TIMEOUT_MS = 5 * 60_000;
 const DEFAULT_MAX_FINDINGS = 10_000;
 const DEFAULT_MAX_MEMORY_MB = 512;
+/** Extra time, beyond timeoutMs, that validating a plugin's output may take. */
+const COLLECT_GRACE_MS = 1000;
+/** message and evidence are cut to this many characters (plus an ellipsis). */
+export const MAX_TEXT_CHARS = 8192;
+/** Redaction looks this far past the cut, so a secret straddling it is still caught whole. */
+const REDACT_LOOKAHEAD_CHARS = 4096;
+const MAX_FILE_CHARS = 4096;
 
 export function definePlugin(plugin: Plugin): Plugin {
   if (typeof plugin?.name !== "string" || !NAME.test(plugin.name)) {
@@ -93,13 +112,49 @@ function result(name: string, start: number, status: PluginStatus, extra: Partia
   });
 }
 
-/** Validates untrusted plugin output and converts it into host-owned Findings. */
-async function collect(name: string, output: unknown, scope: Scope, start: number, maxFindings: number): Promise<PluginRunResult> {
+/**
+ * Caps untrusted text. Redaction runs on a window a little past the cut, so a
+ * secret that straddles the cut is removed whole, not left half-visible.
+ */
+function capText(value: unknown): unknown {
+  if (typeof value !== "string" || value.length <= MAX_TEXT_CHARS) return value;
+  return `${redact(value.slice(0, MAX_TEXT_CHARS + REDACT_LOOKAHEAD_CHARS)).slice(0, MAX_TEXT_CHARS)}…`;
+}
+
+interface CollectLimits {
+  readonly maxFindings: number;
+  readonly maxItems: number;
+  /** performance.now() value after which processing is abandoned. */
+  readonly deadline: number;
+}
+
+/** The deadline counts from the plugin's start: total host time is about timeoutMs + COLLECT_GRACE_MS. */
+const limitsFor = (options: RunOptions, start: number): CollectLimits => {
+  const maxFindings = options.maxFindings ?? DEFAULT_MAX_FINDINGS;
+  return {
+    maxFindings,
+    maxItems: options.maxItems ?? maxFindings * 2,
+    deadline: start + (options.timeoutMs ?? DEFAULT_TIMEOUT_MS) + COLLECT_GRACE_MS,
+  };
+};
+
+/**
+ * Validates untrusted plugin output and converts it into host-owned Findings.
+ * Bounded in time (limits.deadline), items examined and text size (#52).
+ */
+async function collect(name: string, output: unknown, scope: Scope, start: number, limits: CollectLimits): Promise<PluginRunResult> {
   if (!Array.isArray(output)) return result(name, start, "invalid-output", { error: "plugin must return an array of findings" });
+  const { maxFindings, maxItems, deadline } = limits;
 
   const fileCache = new Map<string, string | null>();
   const toRelative = async (file: string): Promise<string | null> => {
     let rel = fileCache.get(file);
+    if (rel === undefined && !path.isAbsolute(file)) {
+      // A relative path is relative to the root; one that climbs out of it
+      // ("../x") is rejected without touching the filesystem (#52).
+      const lexical = path.relative(scope.root, path.resolve(scope.root, file));
+      if (lexical === ".." || lexical.startsWith(`..${path.sep}`)) rel = null;
+    }
     if (rel === undefined) {
       rel = await scope.resolve(file).then(
         (real) => path.relative(scope.root, real).split(path.sep).join("/") || ".",
@@ -114,9 +169,12 @@ async function collect(name: string, output: unknown, scope: Scope, start: numbe
   let skipped = 0;
   let truncated = false;
   for (let i = 0; i < output.length; i++) {
-    if (findings.length >= maxFindings) {
+    if (findings.length >= maxFindings || i >= maxItems) {
       truncated = true;
       break;
+    }
+    if (performance.now() > deadline) {
+      return result(name, start, "invalid-output", { error: "processing the plugin's output exceeded the time limit" });
     }
     const item: unknown = output[i];
     if (typeof item !== "object" || item === null) {
@@ -126,7 +184,7 @@ async function collect(name: string, output: unknown, scope: Scope, start: numbe
     const raw = item as Record<string, unknown>;
     let file: string | undefined;
     if (raw.file !== undefined) {
-      const rel = typeof raw.file === "string" && raw.file.length > 0 ? await toRelative(raw.file) : null;
+      const rel = typeof raw.file === "string" && raw.file.length > 0 && raw.file.length <= MAX_FILE_CHARS ? await toRelative(raw.file) : null;
       if (rel === null) {
         skipped++;
         continue;
@@ -139,10 +197,10 @@ async function collect(name: string, output: unknown, scope: Scope, start: numbe
           engine: `plugin:${name}`,
           ruleId: raw.ruleId as string,
           severity: raw.severity as string,
-          message: raw.message as string,
+          message: capText(raw.message) as string,
           file,
           line: raw.line as number | undefined,
-          evidence: raw.evidence as string | undefined,
+          evidence: capText(raw.evidence) as string | undefined,
         }),
       );
     } catch {
@@ -158,7 +216,7 @@ const TIMED_OUT: unique symbol = Symbol("timeout");
 export async function runPlugin(plugin: Plugin, scope: Scope, options: RunOptions = {}): Promise<PluginRunResult> {
   const start = performance.now();
   const controller = new AbortController();
-  const ctx: PluginContext = Object.freeze({ root: scope.root, signal: controller.signal });
+  const ctx: PluginContext = Object.freeze({ root: scope.root, signal: controller.signal, resolve: scope.resolve });
   let timer: NodeJS.Timeout | undefined;
   const timeout = new Promise<typeof TIMED_OUT>((resolve) => {
     timer = setTimeout(() => resolve(TIMED_OUT), options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
@@ -169,7 +227,8 @@ export async function runPlugin(plugin: Plugin, scope: Scope, options: RunOption
       controller.abort();
       return result(plugin.name, start, "timeout", { error: "plugin timed out" });
     }
-    return await collect(plugin.name, output, scope, start, options.maxFindings ?? DEFAULT_MAX_FINDINGS);
+    clearTimeout(timer);
+    return await collect(plugin.name, output, scope, start, limitsFor(options, start));
   } catch (e) {
     controller.abort();
     return result(plugin.name, start, "error", { error: errorText(e) });
@@ -181,6 +240,16 @@ export async function runPlugin(plugin: Plugin, scope: Scope, options: RunOption
 // Plain JS evaluated inside the worker, so it works from both src (tests) and dist.
 const WORKER_SOURCE = `
 const { parentPort, workerData } = require("node:worker_threads");
+const fs = require("node:fs/promises");
+const nodePath = require("node:path");
+// Same containment rule as scope.resolve(): realpath, then must be inside the root.
+const resolve = async (input) => {
+  if (typeof input !== "string" || input.length === 0 || input.includes("\\0")) throw new Error("invalid path");
+  const real = await fs.realpath(nodePath.resolve(workerData.root, input));
+  const rel = nodePath.relative(workerData.root, real);
+  if (rel === ".." || rel.startsWith(".." + nodePath.sep) || nodePath.isAbsolute(rel)) throw new Error("path is outside the scan scope");
+  return real;
+};
 const text = (e) => (e && e.message) ? String(e.message) : String(e);
 (async () => {
   let mod;
@@ -193,7 +262,9 @@ const text = (e) => (e && e.message) ? String(e.message) : String(e);
   }
   try {
     const signal = new AbortController().signal;
-    const output = await plugin.run(Object.freeze({ root: workerData.root, signal }));
+    let output = await plugin.run(Object.freeze({ root: workerData.root, signal, resolve }));
+    // Only send what the host will examine, so a huge array isn't cloned across.
+    if (Array.isArray(output) && output.length > workerData.maxItems) output = Array.prototype.slice.call(output, 0, workerData.maxItems);
     parentPort.postMessage({ type: "result", name: plugin.name, output });
   } catch (e) {
     parentPort.postMessage({ type: "error", name: plugin.name, message: text(e) });
@@ -206,13 +277,14 @@ export function runPluginModule(modulePath: string, scope: Scope, options: Modul
   const start = performance.now();
   let name = path.basename(String(modulePath)).replace(/\.[cm]?js$/, "");
   const maxFindings = options.maxFindings ?? DEFAULT_MAX_FINDINGS;
+  const maxItems = options.maxItems ?? maxFindings * 2;
 
   return new Promise((resolve) => {
     let worker: Worker;
     try {
       worker = new Worker(WORKER_SOURCE, {
         eval: true,
-        workerData: { url: pathToFileURL(path.resolve(modulePath)).href, root: scope.root },
+        workerData: { url: pathToFileURL(path.resolve(modulePath)).href, root: scope.root, maxItems: maxItems + 1 },
         env: { ...(options.env ?? { PATH: process.env.PATH ?? "" }) },
         stdout: true,
         stderr: true,
@@ -244,7 +316,7 @@ export function runPluginModule(modulePath: string, scope: Scope, options: Modul
       if (typeof m.name === "string" && NAME.test(m.name)) name = m.name;
       else if (m.name !== undefined) return settle(result(name, start, "invalid-output", { error: "plugin has an invalid name" }));
 
-      if (m.type === "result") return settle(collect(name, m.output, scope, start, maxFindings));
+      if (m.type === "result") return settle(collect(name, m.output, scope, start, limitsFor(options, start)));
       if (m.type === "invalid") return settle(result(name, start, "invalid-output", { error: String(m.message) }));
       return settle(result(name, start, "error", { error: redact(String(m.message ?? "plugin failed")) }));
     });
