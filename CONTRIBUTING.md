@@ -34,7 +34,7 @@ Use the form `area: short imperative summary`, for example `core: add redaction 
 
 - **Node >= 22.13.0**, TypeScript `strict`, ESM.
 - **Test-first.** Write a failing test, then the minimal code to pass it. PRs without tests for new behavior won't be merged.
-- Run before pushing: `npm run lint && npm run build && npm test`.
+- Run before pushing: `npm run lint && npm run build && npm test`. Or open the developer console with `npm run ui` and press `a` to run the same checks as CI, with an error log for anything that fails.
 - **No network calls in `@cyberkit/core`.** The static no-network test must keep passing.
 - **Never log or store secrets.** Findings must go through redaction.
 - Findings are immutable. Don't mutate them after creation.

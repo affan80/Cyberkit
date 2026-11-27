@@ -1,0 +1,10 @@
+#!/usr/bin/env node
+import { existsSync } from "node:fs";
+
+const cli = new URL("../dist/cli.js", import.meta.url);
+if (!existsSync(cli)) {
+  process.stderr.write("cyberkit-dev: not built yet. Run `npm run build` in the repo root first.\n");
+  process.exit(2);
+}
+const { run } = await import(cli.href);
+await run();
